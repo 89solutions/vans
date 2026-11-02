@@ -17,7 +17,56 @@
   }
 
   function emptyState() {
-    return { version: 1, setupComplete: false, items: [], log: [], currentJob: '' };
+    return { version: 1, setupComplete: false, setupTrade: null, items: [], log: [], currentJob: '' };
+  }
+
+  const UNIT_WORDS = {
+    each: 'each', ea: 'each', pc: 'each', pcs: 'each', piece: 'each', pieces: 'each', off: 'each', no: 'each',
+    m: 'm', mtr: 'm', mtrs: 'm', metre: 'm', metres: 'm', meter: 'm', meters: 'm',
+    pack: 'pack', packs: 'pack', pk: 'pack',
+    box: 'box', boxes: 'box',
+    roll: 'roll', rolls: 'roll',
+    l: 'L', ltr: 'L', litre: 'L', litres: 'L', liter: 'L', liters: 'L',
+    kg: 'kg', kgs: 'kg', kilo: 'kg', kilos: 'kg',
+  };
+
+  // A number before these words describes the part, as in "2 gang socket", rather than counting it.
+  const DESCRIPTORS = ['gang', 'way', 'pole', 'core', 'port', 'amp', 'amps', 'mm', 'mil', 'inch', 'inches', 'bar', 'pin', 'hole', 'phase'];
+
+  function unitFromWord(word) {
+    return UNIT_WORDS[String(word).toLowerCase()];
+  }
+
+  function namedLine(name, qty, unit) {
+    const clean = name.replace(/[\s,;:=]+$/, '').trim();
+    if (!clean) throw new Error('Add a name as well as a number.');
+    if (clean.length > 80) throw new Error('That name is too long.');
+    return { name: clean, qty: qty, unit: unit || null };
+  }
+
+  // Reads one typed, spoken or pasted line such as "15mm elbow 12", "twin and earth 50m" or "12 x 15mm elbow".
+  function parseItemLine(raw) {
+    const line = String(raw).replace(/\t+/g, ' ').replace(/^\s*[-*•]\s+/, '').replace(/[\s,;]+$/, '').trim();
+    if (!line) throw new Error('Type a part name and how many.');
+
+    const trailing = line.match(/^(.+?)(?:\s*[,;:=]\s*|\s+[-–]\s+|\s+)(?:[x×]\s*)?(\d+(?:\.\d+)?)(?:\s*([a-z]+))?$/i);
+    if (trailing && (trailing[3] === undefined || unitFromWord(trailing[3]))) {
+      return namedLine(trailing[1], trailing[2], trailing[3] ? unitFromWord(trailing[3]) : null);
+    }
+
+    const leading = line.match(/^(\d+(?:\.\d+)?)(\s*)(.*)$/);
+    if (leading) {
+      let rest = leading[3];
+      const firstWord = rest.split(/\s+/)[0];
+      const unit = unitFromWord(firstWord);
+      if (unit) rest = rest.slice(firstWord.length).trim();
+      const counted = /^(?:x|×|of)\s+/i.test(rest);
+      if (counted) rest = rest.replace(/^(?:x|×|of)\s+/i, '');
+      const describes = !unit && !counted && (!leading[2] || DESCRIPTORS.includes(firstWord.toLowerCase()));
+      if (!describes && rest) return namedLine(rest, leading[1], unit);
+    }
+
+    throw new Error('Add how many at the end, like "15mm elbow 12".');
   }
 
   function toNumber(value) {
@@ -82,6 +131,7 @@
     return {
       version: 1,
       setupComplete: Boolean(raw.setupComplete),
+      setupTrade: raw.setupTrade ? String(raw.setupTrade) : null,
       items: raw.items.map(cleanItem),
       log: raw.log.map(cleanEntry),
       currentJob: String(raw.currentJob || ''),
@@ -154,6 +204,47 @@
         if (state.setupComplete && item.qty > 0) addLog(item, 'added', item.qty);
         save();
         return item;
+      },
+
+      findItem(name) {
+        const lower = String(name).trim().toLowerCase();
+        return state.items.find((i) => i.name.toLowerCase() === lower);
+      },
+
+      addFromLine(line, defaults) {
+        const parsed = parseItemLine(line);
+        const base = defaults || {};
+        return this.addItem({ ...base, name: parsed.name, qty: parsed.qty, unit: parsed.unit || base.unit });
+      },
+
+      // Adds what it can from a pasted list and reports the lines it could not use.
+      addLines(text, defaults) {
+        const result = { added: [], failed: [] };
+        String(text).split(/\r?\n/).filter((line) => line.trim()).forEach((line) => {
+          try {
+            result.added.push(this.addFromLine(line, defaults));
+          } catch (err) {
+            result.failed.push({ line: line, reason: err.message });
+          }
+        });
+        return result;
+      },
+
+      // Sets the count for a starter list part. At 0 the part is not kept on the van's list.
+      setStarterCount(part, value) {
+        const qty = requireQty(value, 'Quantity', true);
+        const existing = this.findItem(part.name);
+        if (existing) {
+          if (qty === 0) this.deleteItem(existing.id);
+          else this.updateItem(existing.id, { ...existing, qty: qty });
+        } else if (qty > 0) {
+          this.addItem({ ...part, qty: qty });
+        }
+      },
+
+      setSetupTrade(trade) {
+        state.setupTrade = trade;
+        save();
       },
 
       updateItem(id, fields) {
@@ -288,5 +379,5 @@
     };
   }
 
-  global.VanStore = { createStore: createStore, UNITS: UNITS };
+  global.VanStore = { createStore: createStore, parseItemLine: parseItemLine, UNITS: UNITS };
 })(window);

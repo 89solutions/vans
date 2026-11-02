@@ -2,7 +2,8 @@
 
 A phone-first web app for tradespeople to track the parts they carry on their van.
 
-- **First use:** asks for a full inventory, listing each part and how many are held.
+- **First use:** choose a trade and count parts on a ready-made list, or start from a blank list.
+- **Quick add:** type `15mm elbow 12` or `twin and earth 50m` in one box, or paste a whole list. Works in setup and on the Stock tab.
 - **On the job:** tap **Use 1** beside a part, or tap the part to enter a larger amount. Stock is deducted straight away, with an Undo.
 - **Current job:** optionally type a job or address, and each use is recorded against it.
 - **Stock:** add, edit and restock parts, and see what is low or out.
@@ -18,6 +19,7 @@ Data is saved in the browser on that device (`localStorage`). It is not shared b
 | --- | --- |
 | `index.html` | Page shell |
 | `store.js` | Stock data and rules |
+| `starters.js` | Ready-made part lists for each trade |
 | `app.js` | Screens and interaction |
 | `stylesheet.css` | Styles, including dark mode |
 | `sw.js` | Offline support |

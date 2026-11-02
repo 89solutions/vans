@@ -16,6 +16,8 @@
     stockSearch: '',
     stockFilter: 'all',
     historyLimit: 100,
+    setupFilter: '',
+    quick: { more: false, category: '', unit: 'each', low: '' },
   };
 
   function openStorage() {
@@ -282,7 +284,7 @@
     };
   }
 
-  function itemDialog(item, { preset, after }) {
+  function itemDialog(item, { after }) {
     const refresh = after || render;
     openDialog((close) => {
       const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
@@ -291,25 +293,23 @@
         onsubmit: (event) => {
           event.preventDefault();
           try {
-            const fields = readItemForm(event.target);
-            if (item) store.updateItem(item.id, fields);
-            else store.addItem(fields);
+            store.updateItem(item.id, readItemForm(event.target));
             close();
             refresh();
-            showToast(item ? 'Changes saved.' : 'Added to your stock.');
+            showToast('Changes saved.');
           } catch (err) {
             error.textContent = err.message;
             error.hidden = false;
           }
         },
       },
-      h('h2', null, item ? 'Edit item' : 'Add item'),
-      itemFields(item || preset),
+      h('h2', null, 'Edit item'),
+      itemFields(item),
       error,
       h('div', { class: 'sheet-actions' },
         h('button', { class: 'btn', type: 'button', onclick: close }, 'Cancel'),
-        h('button', { class: 'btn btn-primary', type: 'submit' }, item ? 'Save' : 'Add item')),
-      item ? h('button', {
+        h('button', { class: 'btn btn-primary', type: 'submit' }, 'Save')),
+      h('button', {
         class: 'btn btn-quiet-danger',
         type: 'button',
         onclick: async () => {
@@ -325,27 +325,220 @@
             refresh();
           }
         },
-      }, 'Delete item') : null);
+      }, 'Delete item'));
     });
+  }
+
+  /* ---------- Quick add ---------- */
+
+  function quickDefaults() {
+    return { category: ui.quick.category, unit: ui.quick.unit, low: ui.quick.low };
+  }
+
+  function partCount(count) {
+    return count === 1 ? '1 part' : count + ' parts';
+  }
+
+  function openPasteSheet(text, onAdded) {
+    openDialog((close) => {
+      const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
+      const area = h('textarea', {
+        class: 'paste-area',
+        rows: 8,
+        autocomplete: 'off',
+        'aria-label': 'Your list of parts',
+        placeholder: '15mm elbow 12\n22mm tee 4\nTwin and earth 50m',
+      });
+      area.value = text || '';
+      return h('form', {
+        novalidate: true,
+        onsubmit: (event) => {
+          event.preventDefault();
+          const result = store.addLines(area.value, quickDefaults());
+          if (result.added.length > 0) onAdded();
+          if (result.failed.length === 0 && result.added.length > 0) {
+            close();
+            showToast('Added ' + partCount(result.added.length) + '.');
+            return;
+          }
+          if (result.failed.length === 0) {
+            error.textContent = 'Type or paste at least one line.';
+          } else {
+            area.value = result.failed.map((f) => f.line).join('\n');
+            error.textContent = 'Added ' + partCount(result.added.length) + '. Fix the lines left here. '
+              + 'First problem, "' + result.failed[0].line + '": ' + result.failed[0].reason;
+          }
+          error.hidden = false;
+        },
+      },
+      h('h2', null, 'Paste a list'),
+      h('p', { class: 'muted' }, 'One part per line, with how many. A column copied from a spreadsheet works too.'),
+      area,
+      error,
+      h('div', { class: 'sheet-actions' },
+        h('button', { class: 'btn', type: 'button', onclick: close }, 'Close'),
+        h('button', { class: 'btn btn-primary', type: 'submit' }, 'Add these parts')));
+    });
+  }
+
+  function quickAddBox({ initial, onAdded }) {
+    const feedback = h('p', { class: 'quick-feedback', role: 'status', hidden: true });
+    const setFeedback = (text, isError) => {
+      feedback.textContent = text;
+      feedback.hidden = false;
+      feedback.classList.toggle('form-error', isError);
+    };
+
+    const line = h('input', {
+      name: 'line',
+      type: 'text',
+      autocomplete: 'off',
+      autocapitalize: 'sentences',
+      enterkeyhint: 'next',
+      'aria-label': 'Part name and how many',
+      placeholder: 'e.g. 15mm elbow 12',
+      value: initial || '',
+      onpaste: (event) => {
+        const pasted = event.clipboardData.getData('text');
+        if (/\n/.test(pasted.trim())) {
+          event.preventDefault();
+          openPasteSheet(pasted, onAdded);
+        }
+      },
+    });
+
+    const lowInput = h('input', {
+      type: 'text',
+      inputmode: 'decimal',
+      autocomplete: 'off',
+      value: ui.quick.low,
+      oninput: (event) => {
+        ui.quick.low = event.target.value;
+      },
+    });
+
+    const categoryOptions = h('datalist', { id: 'quick-category-options' }, store.categories().map((c) => h('option', { value: c })));
+
+    const moreOptions = h('div', { class: 'quick-more', hidden: !ui.quick.more },
+      h('div', { class: 'field-row' },
+        h('label', { class: 'field' },
+          h('span', null, 'Category'),
+          h('input', {
+            type: 'text',
+            maxlength: 40,
+            autocomplete: 'off',
+            list: 'quick-category-options',
+            value: ui.quick.category,
+            oninput: (event) => {
+              ui.quick.category = event.target.value;
+            },
+          })),
+        h('label', { class: 'field' },
+          h('span', null, 'Unit if not typed'),
+          h('select', {
+            onchange: (event) => {
+              ui.quick.unit = event.target.value;
+            },
+          }, VanStore.UNITS.map((unit) => h('option', { value: unit, selected: unit === ui.quick.unit }, unit))))),
+      h('label', { class: 'field' }, h('span', null, 'Warn when down to'), lowInput),
+      categoryOptions,
+      h('p', { class: 'muted small' }, 'Category and unit stay set for the next part, which helps when working through one shelf.'));
+
+    return h('form', {
+      class: 'card quick-add',
+      novalidate: true,
+      onsubmit: (event) => {
+        event.preventDefault();
+        try {
+          const item = store.addFromLine(line.value, quickDefaults());
+          line.value = '';
+          lowInput.value = '';
+          ui.quick.low = '';
+          categoryOptions.replaceChildren(...store.categories().map((c) => h('option', { value: c })));
+          setFeedback('Added ' + item.name + ': ' + fmtQty(item.qty, item.unit), false);
+          line.focus();
+          onAdded(item);
+        } catch (err) {
+          setFeedback(err.message, true);
+          line.focus();
+        }
+      },
+    },
+    h('div', { class: 'quick-line' },
+      line,
+      h('button', { class: 'btn btn-strong', type: 'submit' }, 'Add')),
+    feedback,
+    h('div', { class: 'quick-links' },
+      h('button', {
+        class: 'link-btn',
+        type: 'button',
+        onclick: () => {
+          ui.quick.more = !ui.quick.more;
+          moreOptions.hidden = !ui.quick.more;
+        },
+      }, 'More options'),
+      h('button', {
+        class: 'link-btn',
+        type: 'button',
+        onclick: () => openPasteSheet(line.value, onAdded),
+      }, 'Paste a list')),
+    moreOptions);
+  }
+
+  function openQuickAddDialog(initial) {
+    const dialog = openDialog((close) => [
+      h('h2', null, 'Add a part'),
+      h('p', { class: 'muted' }, 'Type the name, then how many.'),
+      quickAddBox({
+        initial: initial,
+        onAdded: () => {
+          close();
+          render();
+          showToast('Added to your stock.');
+        },
+      }),
+    ]);
+    const input = dialog.querySelector('input');
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
   }
 
   /* ---------- First use: inventory setup ---------- */
 
-  function setupScreen() {
-    const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
-    const list = h('ul', { class: 'rows' });
-    const heading = h('h2', { class: 'section-title' });
+  function tradeScreen() {
+    const choose = (trade) => {
+      store.setSetupTrade(trade);
+      ui.setupFilter = '';
+      render();
+      window.scrollTo(0, 0);
+    };
+    return h('div', { class: 'screen' },
+      h('p', { class: 'brand' }, 'Van Stock'),
+      h('h1', null, 'What’s on your van?'),
+      h('p', { class: 'muted' }, 'Choose your trade for a ready-made list of parts, then just count what you carry.'),
+      h('div', { class: 'stack' },
+        VanStarters.map((trade) => h('button', {
+          class: 'btn btn-primary btn-wide',
+          type: 'button',
+          onclick: () => choose(trade.id),
+        }, trade.label)),
+        h('button', { class: 'btn btn-wide', type: 'button', onclick: () => choose('blank') }, 'Start with a blank list')));
+  }
+
+  function setupListScreen() {
+    const trade = VanStarters.find((t) => t.id === store.state.setupTrade);
+    const starterNames = new Set();
+    const counters = [];
+    const ownHeading = h('h2', { class: 'section-title' });
+    const ownList = h('ul', { class: 'rows' });
     const finish = h('button', { class: 'btn btn-primary btn-wide', type: 'button' });
-    let form;
 
     function refreshSetup() {
-      const items = [...store.state.items].reverse();
-      const count = items.length;
-      heading.textContent = count === 1 ? '1 item added' : count + ' items added';
-      heading.hidden = count === 0;
-      finish.textContent = count === 0 ? 'Add your first item above' : 'Finish setup (' + (count === 1 ? '1 item' : count + ' items') + ')';
-      finish.disabled = count === 0;
-      list.replaceChildren(...items.map((item) => h('li', null,
+      const count = store.state.items.length;
+      const own = store.state.items.filter((i) => !starterNames.has(i.name.toLowerCase())).reverse();
+      ownHeading.textContent = trade ? 'Your own parts' : partCount(count) + ' added';
+      ownHeading.hidden = own.length === 0;
+      ownList.replaceChildren(...own.map((item) => h('li', null,
         h('button', {
           class: 'row row-plain',
           type: 'button',
@@ -355,44 +548,127 @@
           h('span', { class: 'row-name' }, item.name),
           item.category ? h('span', { class: 'row-meta' }, item.category) : null),
         h('span', { class: 'row-qty' }, fmtQty(item.qty, item.unit))))));
-      const options = form.querySelector('#category-options');
-      options.replaceChildren(...store.categories().map((c) => h('option', { value: c })));
+      counters.forEach((counter) => counter.refresh());
+      finish.textContent = count === 0 ? (trade ? 'Count at least one part' : 'Add your first part above') : 'Finish setup (' + partCount(count) + ')';
+      finish.disabled = count === 0;
     }
 
-    function addFromForm() {
-      const fields = readItemForm(form);
-      if (fields.qty === '') throw new Error('Enter how many you have. Use 0 if you have run out.');
-      const item = store.addItem(fields);
-      form.elements.name.value = '';
-      form.elements.qty.value = '';
-      form.elements.low.value = '';
-      error.hidden = true;
-      refreshSetup();
-      form.elements.name.focus();
-      return item;
-    }
-
-    form = h('form', {
-      class: 'card',
-      novalidate: true,
-      onsubmit: (event) => {
-        event.preventDefault();
+    function partRow(part) {
+      const held = () => {
+        const item = store.findItem(part.name);
+        return item ? item.qty : 0;
+      };
+      const setCount = (value) => {
         try {
-          addFromForm();
+          store.setStarterCount(part, String(value).trim() === '' ? 0 : value);
         } catch (err) {
-          error.textContent = err.message;
-          error.hidden = false;
+          showToast(err.message);
         }
+        refreshSetup();
+      };
+      const input = h('input', {
+        class: 'count-input',
+        type: 'text',
+        inputmode: 'decimal',
+        autocomplete: 'off',
+        placeholder: '0',
+        'aria-label': 'How many ' + part.name,
+        onfocus: (event) => event.target.select(),
+        onchange: (event) => setCount(event.target.value),
+      });
+      const minus = h('button', {
+        class: 'count-btn',
+        type: 'button',
+        'aria-label': 'One fewer ' + part.name,
+        onclick: () => setCount(Math.max(0, held() - 1)),
+      }, '−');
+      const row = h('li', { class: 'part-row' },
+        h('span', { class: 'row-text' },
+          h('span', { class: 'row-name' }, part.name),
+          part.unit !== 'each' ? h('span', { class: 'row-meta' }, part.unit) : null),
+        h('span', { class: 'counter' },
+          minus,
+          input,
+          h('button', {
+            class: 'count-btn',
+            type: 'button',
+            'aria-label': 'One more ' + part.name,
+            onclick: () => setCount(held() + 1),
+          }, '+')));
+      counters.push({
+        part: part,
+        row: row,
+        refresh: () => {
+          const qty = held();
+          input.value = qty > 0 ? String(qty) : '';
+          minus.disabled = qty <= 0;
+          row.classList.toggle('counted', qty > 0);
+        },
+      });
+      return row;
+    }
+
+    let starterList = null;
+    let applyFilter = () => {};
+    if (trade) {
+      trade.categories.forEach((category) => category.parts.forEach((part) => starterNames.add(part.name.toLowerCase())));
+      const sections = trade.categories.map((category) => {
+        const rows = category.parts.map(partRow);
+        return {
+          rows: rows,
+          parts: category.parts,
+          el: h('section', null, h('h2', { class: 'section-title' }, category.name), h('ul', { class: 'rows' }, rows)),
+        };
+      });
+      const noMatch = h('p', { class: 'muted', hidden: true }, 'Not on this list. Add it with the box above.');
+      applyFilter = () => {
+        let shown = 0;
+        sections.forEach((section) => {
+          let inSection = 0;
+          section.parts.forEach((part, index) => {
+            const show = matches(part, ui.setupFilter);
+            section.rows[index].hidden = !show;
+            if (show) inSection += 1;
+          });
+          section.el.hidden = inSection === 0;
+          shown += inSection;
+        });
+        noMatch.hidden = shown > 0;
+      };
+      starterList = h('div', { class: 'list' },
+        searchField(ui.setupFilter, 'Find a part on this list', (value) => {
+          ui.setupFilter = value;
+          applyFilter();
+        }),
+        sections.map((section) => section.el),
+        noMatch);
+    }
+
+    // A part typed by hand that is also on the list goes under the list's category.
+    function fileTypedParts() {
+      if (!trade) return;
+      trade.categories.forEach((category) => category.parts.forEach((part) => {
+        const item = store.findItem(part.name);
+        if (item && !item.category) store.updateItem(item.id, { ...item, category: part.category });
+      }));
+    }
+
+    const box = quickAddBox({
+      onAdded: () => {
+        fileTypedParts();
+        refreshSetup();
       },
-    },
-    itemFields({ unit: 'each' }),
-    error,
-    h('button', { class: 'btn btn-strong btn-wide', type: 'submit' }, 'Add item'));
+    });
 
     finish.addEventListener('click', () => {
       try {
-        // Keep anything still typed in the form instead of dropping it.
-        if (form.elements.name.value.trim()) addFromForm();
+        // Keep anything still typed in the box instead of dropping it.
+        const pending = box.elements.line;
+        if (pending.value.trim()) {
+          store.addFromLine(pending.value, quickDefaults());
+          pending.value = '';
+          fileTypedParts();
+        }
         store.finishSetup();
         if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
         ui.tab = 'use';
@@ -400,22 +676,32 @@
         window.scrollTo(0, 0);
         showToast('Inventory saved. Tap Use 1 each time you use a part.');
       } catch (err) {
-        error.textContent = err.message;
-        error.hidden = false;
+        showToast(err.message);
       }
     });
 
+    applyFilter();
     refreshSetup();
 
     return h('div', { class: 'screen setup' },
       h('p', { class: 'brand' }, 'Van Stock'),
-      h('h1', null, 'What’s on your van?'),
-      h('p', { class: 'muted' },
-        'List every part you carry and how many you have. Work through one shelf at a time. '
-        + 'Your unit and category stay filled in to save typing, and your progress saves as you go.'),
-      form,
-      heading,
-      list,
+      h('h1', null, trade ? trade.label + ' parts' : 'What’s on your van?'),
+      h('p', { class: 'muted' }, trade
+        ? 'Tap + or type how many you carry. Skip anything you don’t carry. Your progress saves as you go.'
+        : 'Type each part and how many, then press Add. Your progress saves as you go.'),
+      h('button', {
+        class: 'link-btn',
+        type: 'button',
+        onclick: () => {
+          store.setSetupTrade(null);
+          render();
+          window.scrollTo(0, 0);
+        },
+      }, trade ? 'Choose a different list' : 'Use a ready-made list instead'),
+      box,
+      ownHeading,
+      ownList,
+      starterList,
       h('div', { class: 'setup-finish' }, finish));
   }
 
@@ -518,8 +804,8 @@
       return [emptyMessage('Nothing in stock yet.', h('button', {
         class: 'btn btn-primary',
         type: 'button',
-        onclick: () => itemDialog(null, { preset: { unit: 'each' } }),
-      }, 'Add an item'))];
+        onclick: () => openQuickAddDialog(''),
+      }, 'Add a part'))];
     }
     let items;
     if (ui.filter === 'recent') {
@@ -537,7 +823,7 @@
         return [emptyMessage('Nothing matches "' + name + '".', h('button', {
           class: 'btn',
           type: 'button',
-          onclick: () => itemDialog(null, { preset: { name: name, unit: 'each' } }),
+          onclick: () => openQuickAddDialog(name + ' '),
         }, 'Add it to your stock'))];
       }
       return [emptyMessage(ui.filter === 'recent' ? 'Parts you use will appear here.' : 'Nothing here yet.')];
@@ -659,26 +945,31 @@
   }
 
   function stockView() {
-    const lowCount = store.state.items.filter((i) => store.isLow(i)).length;
-    const list = h('div', { class: 'list' });
-    const fill = () => list.replaceChildren(...stockList());
+    const body = h('div', { class: 'stack-wide' });
+    const fill = () => {
+      const lowCount = store.state.items.filter((i) => store.isLow(i)).length;
+      body.replaceChildren(
+        chipRow([['all', 'All (' + store.state.items.length + ')'], ['low', 'Low or out (' + lowCount + ')']], ui.stockFilter, (id) => {
+          ui.stockFilter = id;
+          render();
+        }),
+        h('div', { class: 'list' }, stockList())
+      );
+    };
     fill();
     return [
-      h('button', {
-        class: 'btn btn-strong btn-wide',
-        type: 'button',
-        'data-key': 'add-item',
-        onclick: () => itemDialog(null, { preset: { unit: 'each' } }),
-      }, 'Add a new item'),
+      // Only the list below redraws after adding, so the phone keyboard stays open for the next part.
+      quickAddBox({
+        onAdded: () => {
+          fill();
+          root.querySelector('.tabs').replaceWith(navBar());
+        },
+      }),
       searchField(ui.stockSearch, 'Search your stock', (value) => {
         ui.stockSearch = value;
         fill();
       }),
-      chipRow([['all', 'All (' + store.state.items.length + ')'], ['low', 'Low or out (' + lowCount + ')']], ui.stockFilter, (id) => {
-        ui.stockFilter = id;
-        render();
-      }),
-      list,
+      body,
     ];
   }
 
@@ -820,6 +1111,7 @@
               ui.filter = 'all';
               ui.stockSearch = '';
               ui.stockFilter = 'all';
+              ui.quick = { more: false, category: '', unit: 'each', low: '' };
               render();
               window.scrollTo(0, 0);
             }
@@ -870,7 +1162,8 @@
     const chips = root.querySelector('.chips');
     const chipScroll = chips ? chips.scrollLeft : 0;
 
-    root.replaceChildren(store.state.setupComplete ? mainScreen() : setupScreen());
+    if (store.state.setupComplete) root.replaceChildren(mainScreen());
+    else root.replaceChildren(store.state.setupTrade ? setupListScreen() : tradeScreen());
 
     const newChips = root.querySelector('.chips');
     if (newChips) newChips.scrollLeft = chipScroll;

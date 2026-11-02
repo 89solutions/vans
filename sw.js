@@ -1,10 +1,11 @@
 // Offline support: answer from the cache straight away, refresh the cache in the background.
-const CACHE = 'van-stock-v1';
+const CACHE = 'van-stock-v2';
 const FILES = [
   './',
   'index.html',
   'stylesheet.css',
   'store.js',
+  'starters.js',
   'app.js',
   'manifest.webmanifest',
   'favicon.svg',

@@ -12,6 +12,7 @@
   <h1 id="summary">Running</h1>
   <ul id="results"></ul>
   <script src="../store.js"></script>
+  <script src="../starters.js"></script>
   <script>
     function memoryStorage(initial) {
       const data = new Map(Object.entries(initial || {}));
@@ -165,6 +166,93 @@
         store.importJson(backup);
         equal(store.state.items[0].qty, 8);
         equal(store.state.log.length, 1);
+      },
+      'typed lines are read as name, quantity and unit': () => {
+        const cases = [
+          ['15mm elbow 12', '15mm elbow', '12', null],
+          ['twin and earth 50m', 'twin and earth', '50', 'm'],
+          ['Twin and earth 50 metres', 'Twin and earth', '50', 'm'],
+          ['12 x 15mm elbow', '15mm elbow', '12', null],
+          ['12 15mm elbows', '15mm elbows', '12', null],
+          ['12 elbows', 'elbows', '12', null],
+          ['50m twin and earth', 'twin and earth', '50', 'm'],
+          ['3 boxes wood screws', 'wood screws', '3', 'box'],
+          ['2 gang socket 6', '2 gang socket', '6', null],
+          ['6 2 gang sockets', '2 gang sockets', '6', null],
+          ['Elbow x12', 'Elbow', '12', null],
+          ['Elbow, 12', 'Elbow', '12', null],
+          ['Elbow - 12', 'Elbow', '12', null],
+          ['Elbow\t12', 'Elbow', '12', null],
+          ['- PTFE tape 3 rolls', 'PTFE tape', '3', 'roll'],
+          ['Blown fuses 0', 'Blown fuses', '0', null],
+          ['Cable 2.5mm 7.5m', 'Cable 2.5mm', '7.5', 'm'],
+        ];
+        cases.forEach(([line, name, qty, unit]) => {
+          const parsed = VanStore.parseItemLine(line);
+          equal(parsed.name + '|' + parsed.qty + '|' + parsed.unit, name + '|' + qty + '|' + unit);
+        });
+      },
+      'lines with no clear quantity are refused': () => {
+        ['15mm elbow', 'Cable 2.5mm', '13A socket', '2 gang socket', '3 way box', '12', '   ', '5 m'].forEach((line) => {
+          let refused = false;
+          try {
+            VanStore.parseItemLine(line);
+          } catch (err) {
+            refused = true;
+          }
+          equal(line + ':' + refused, line + ':true');
+        });
+      },
+      'quick add uses the typed unit over the default': () => {
+        const { store } = setup();
+        equal(store.addFromLine('Cable 50m', { unit: 'box', category: 'A' }).unit, 'm');
+        const tee = store.addFromLine('Tee 4', { unit: 'box', category: 'A', low: '1' });
+        equal(tee.unit, 'box');
+        equal(tee.category, 'A');
+        equal(tee.low, 1);
+      },
+      'pasted lists add what they can and report the rest': () => {
+        const { store } = setup();
+        const result = store.addLines('Tee 4\r\n\r\nno number\nElbow 3\nCable 50m\n', {});
+        equal(result.added.length, 2);
+        equal(result.failed.map((f) => f.line).join('|'), 'no number|Elbow 3');
+        equal(store.state.items.length, 3);
+      },
+      'starter counts add, update and remove parts, without history during setup': () => {
+        const store = VanStore.createStore(memoryStorage());
+        const part = { name: '15mm elbow', unit: 'each', category: 'Fittings' };
+        store.setStarterCount(part, 0);
+        equal(store.state.items.length, 0);
+        store.setStarterCount(part, 3);
+        equal(store.findItem('15MM ELBOW').qty, 3);
+        equal(store.findItem('15mm elbow').category, 'Fittings');
+        store.setStarterCount(part, 5);
+        equal(store.state.items.length, 1);
+        equal(store.findItem('15mm elbow').qty, 5);
+        store.setStarterCount(part, 0);
+        equal(store.state.items.length, 0);
+        equal(store.state.log.length, 0);
+        throwsWith(() => store.setStarterCount(part, 'lots'), 'number');
+      },
+      'the chosen trade survives a reload and a reset clears it': () => {
+        const storage = memoryStorage();
+        const store = VanStore.createStore(storage);
+        store.setSetupTrade('plumber');
+        equal(VanStore.createStore(storage).state.setupTrade, 'plumber');
+        store.reset();
+        equal(store.state.setupTrade, null);
+      },
+      'starter lists have usable, unique parts': () => {
+        VanStarters.forEach((trade) => {
+          const names = new Set();
+          trade.categories.forEach((category) => category.parts.forEach((part) => {
+            const lower = part.name.toLowerCase();
+            if (names.has(lower)) throw new Error(trade.id + ' repeats ' + part.name);
+            names.add(lower);
+            if (!VanStore.UNITS.includes(part.unit)) throw new Error(part.name + ' has unit ' + part.unit);
+          }));
+          if (names.size < 50) throw new Error(trade.id + ' only has ' + names.size + ' parts');
+        });
       },
       'a bad backup is refused and changes nothing': () => {
         const { store, item } = setup();

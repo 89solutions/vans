@@ -309,6 +309,91 @@ button:disabled { cursor: default; }
 
 .setup-finish .btn { display: block; max-width: 608px; margin: 0 auto; }
 
+.stack-wide { display: flex; flex-direction: column; gap: 14px; }
+
+/* Quick add */
+.quick-add { gap: 8px; padding: 12px; }
+.quick-line { display: flex; gap: 8px; }
+
+.quick-line input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--muted);
+  border-radius: 10px;
+  font-size: 1rem;
+}
+
+.quick-feedback { font-weight: 600; overflow-wrap: anywhere; }
+.quick-links { display: flex; justify-content: space-between; gap: 8px; }
+.quick-more { display: flex; flex-direction: column; gap: 10px; }
+
+.link-btn {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 4px;
+  background: transparent;
+  border: 0;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.paste-area {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--muted);
+  border-radius: 10px;
+  font: inherit;
+  color: inherit;
+  resize: vertical;
+}
+
+/* Starter list counters */
+.part-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 64px;
+  padding: 8px 8px 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.part-row.counted { border: 2px solid var(--accent); padding: 7px 7px 7px 11px; }
+
+.counter { display: flex; flex: none; align-items: center; gap: 4px; }
+
+.count-btn {
+  width: 46px;
+  height: 46px;
+  background: var(--surface-2);
+  border: 0;
+  border-radius: 10px;
+  font-size: 1.4rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.count-btn:disabled { color: var(--muted); opacity: 0.5; }
+
+.count-input {
+  width: 52px;
+  height: 46px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 /* Bottom tabs */
 .tabs {
   position: fixed;
