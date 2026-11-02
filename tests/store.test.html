@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <title>Van Stock store tests</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; margin: 16px; }
+    .fail { color: #b3261e; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1 id="summary">Running</h1>
+  <ul id="results"></ul>
+  <script src="../store.js"></script>
+  <script>
+    function memoryStorage(initial) {
+      const data = new Map(Object.entries(initial || {}));
+      return {
+        data,
+        getItem: (key) => (data.has(key) ? data.get(key) : null),
+        setItem: (key, value) => data.set(key, value),
+      };
+    }
+
+    function setup() {
+      const clock = { time: 1000000 };
+      const storage = memoryStorage();
+      const store = VanStore.createStore(storage, { now: () => clock.time });
+      const item = store.addItem({ name: 'Elbow', qty: '10', unit: 'each', category: 'Fittings', low: '3' });
+      store.finishSetup();
+      return { store, item, clock, storage };
+    }
+
+    function equal(actual, expected) {
+      if (actual !== expected) throw new Error('expected ' + expected + ', got ' + actual);
+    }
+
+    function throwsWith(action, text) {
+      try {
+        action();
+      } catch (err) {
+        if (!err.message.includes(text)) throw new Error('wrong error: ' + err.message);
+        return;
+      }
+      throw new Error('expected an error containing "' + text + '"');
+    }
+
+    const tests = {
+      'a new store needs setup': () => {
+        const store = VanStore.createStore(memoryStorage());
+        equal(store.state.setupComplete, false);
+        throwsWith(() => store.finishSetup(), 'at least one');
+      },
+      'setup items are not logged as history': () => {
+        const { store } = setup();
+        equal(store.state.log.length, 0);
+      },
+      'using an item deducts from stock and logs it': () => {
+        const { store, item } = setup();
+        store.setJob('14 Elm St');
+        const entry = store.useItem(item.id, 3);
+        equal(item.qty, 7);
+        equal(entry.delta, -3);
+        equal(entry.job, '14 Elm St');
+      },
+      'stock cannot go below zero': () => {
+        const { store, item } = setup();
+        throwsWith(() => store.useItem(item.id, 11), 'Only 10 left');
+        equal(item.qty, 10);
+      },
+      'zero, negative and non-numeric use is refused': () => {
+        const { store, item } = setup();
+        throwsWith(() => store.useItem(item.id, 0), 'more than 0');
+        throwsWith(() => store.useItem(item.id, -2), 'more than 0');
+        throwsWith(() => store.useItem(item.id, 'abc'), 'number');
+        throwsWith(() => store.useItem(item.id, ''), 'number');
+        equal(item.qty, 10);
+      },
+      'decimal amounts stay exact': () => {
+        const { store } = setup();
+        const cable = store.addItem({ name: 'Cable', qty: '0.3', unit: 'm' });
+        store.useItem(cable.id, 0.1);
+        equal(cable.qty, 0.2);
+      },
+      'quick repeat taps merge into one entry': () => {
+        const { store, item, clock } = setup();
+        store.useItem(item.id, 1);
+        clock.time += 5000;
+        store.useItem(item.id, 1);
+        equal(store.state.log.length, 1);
+        equal(store.state.log[0].delta, -2);
+        equal(item.qty, 8);
+      },
+      'uses a while apart, or on another job, stay separate': () => {
+        const { store, item, clock } = setup();
+        store.useItem(item.id, 1);
+        clock.time += 61000;
+        store.useItem(item.id, 1);
+        store.setJob('Other job');
+        store.useItem(item.id, 1);
+        equal(store.state.log.length, 3);
+      },
+      'undo restores merged stock and removes the entry': () => {
+        const { store, item } = setup();
+        store.useItem(item.id, 1);
+        const entry = store.useItem(item.id, 2);
+        store.undo(entry.id);
+        equal(item.qty, 10);
+        equal(store.state.log.length, 0);
+      },
+      'undoing a restock whose stock was used is refused': () => {
+        const { store, item, clock } = setup();
+        const restock = store.restock(item.id, 5);
+        clock.time += 61000;
+        store.useItem(item.id, 15);
+        throwsWith(() => store.undo(restock.id), 'since been used');
+        equal(item.qty, 0);
+      },
+      'editing the quantity logs a correction': () => {
+        const { store, item } = setup();
+        store.updateItem(item.id, { ...item, qty: '6' });
+        equal(item.qty, 6);
+        equal(store.state.log[0].type, 'correction');
+        equal(store.state.log[0].delta, -4);
+      },
+      'duplicate names are refused, ignoring case': () => {
+        const { store } = setup();
+        throwsWith(() => store.addItem({ name: ' elbow ', qty: 1 }), 'already');
+      },
+      'low and out are detected': () => {
+        const { store, item } = setup();
+        equal(store.isLow(item), false);
+        store.useItem(item.id, 7);
+        equal(store.isLow(item), true);
+        equal(store.isOut(item), false);
+        store.useItem(item.id, 3);
+        equal(store.isOut(item), true);
+      },
+      'deleted items keep history but cannot be undone': () => {
+        const { store, item } = setup();
+        const entry = store.useItem(item.id, 1);
+        store.deleteItem(item.id);
+        equal(store.state.log.length, 1);
+        equal(store.canUndo(entry), false);
+      },
+      'state survives a reload': () => {
+        const { store, item, storage } = setup();
+        store.useItem(item.id, 4);
+        const reopened = VanStore.createStore(storage);
+        equal(reopened.state.setupComplete, true);
+        equal(reopened.state.items[0].qty, 6);
+      },
+      'unreadable saved data is set aside, not overwritten': () => {
+        const storage = memoryStorage({ 'vans.state.v1': '{broken' });
+        const store = VanStore.createStore(storage);
+        equal(store.state.setupComplete, false);
+        equal(storage.getItem('vans.state.v1.unreadable'), '{broken');
+      },
+      'backup round trip restores everything': () => {
+        const { store, item } = setup();
+        store.useItem(item.id, 2);
+        const backup = store.exportJson();
+        store.reset();
+        equal(store.state.items.length, 0);
+        store.importJson(backup);
+        equal(store.state.items[0].qty, 8);
+        equal(store.state.log.length, 1);
+      },
+      'a bad backup is refused and changes nothing': () => {
+        const { store, item } = setup();
+        throwsWith(() => store.importJson('not json'), 'not a Van Stock');
+        throwsWith(() => store.importJson('{"items":[{"name":"x","qty":-1}],"log":[]}'), 'not a Van Stock');
+        equal(store.state.items[0].id, item.id);
+      },
+    };
+
+    const results = document.getElementById('results');
+    let failed = 0;
+    Object.entries(tests).forEach(([name, test]) => {
+      const row = document.createElement('li');
+      try {
+        test();
+        row.textContent = 'PASS ' + name;
+      } catch (err) {
+        failed += 1;
+        row.textContent = 'FAIL ' + name + ': ' + err.message;
+        row.className = 'fail';
+      }
+      results.append(row);
+    });
+    document.getElementById('summary').textContent =
+      (Object.keys(tests).length - failed) + ' of ' + Object.keys(tests).length + ' passed';
+  </script>
+</body>
+</html>
