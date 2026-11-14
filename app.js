@@ -67,7 +67,35 @@
     stock: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
     history: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+    electrician: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+    plumber: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
+    heating: '<path d="M12 22c4 0 7-2.8 7-7 0-4-3-6.5-4-10-2 2-3 4-3 6-1-1-2-2-2.5-3.5C7 9.5 5 12 5 15c0 4.2 3 7 7 7z"/>',
+    blank: '<path d="M12 5v14M5 12h14"/>',
   };
+
+  // The van from the app icon, drawn in the text colour on an amber tile.
+  const VAN_ART = '<path fill="currentColor" d="M20 34h40v32H18V36a2 2 0 0 1 2-2zM60 44h14l8 10v12H60z"/>'
+    + '<path style="fill:var(--accent)" d="M64 48h8l5 7H64z"/>'
+    + '<circle cx="33" cy="67" r="9" style="fill:var(--accent)"/><circle cx="33" cy="67" r="7" fill="currentColor"/>'
+    + '<circle cx="68" cy="67" r="9" style="fill:var(--accent)"/><circle cx="68" cy="67" r="7" fill="currentColor"/>';
+
+  function vanArt(className, size) {
+    const span = document.createElement('span');
+    span.className = className;
+    span.setAttribute('aria-hidden', 'true');
+    span.style.color = '#1f2328';
+    span.innerHTML = '<svg viewBox="12 20 76 60" width="' + size + '" height="' + size + '">' + VAN_ART + '</svg>';
+    return span;
+  }
+
+  function brandMark() {
+    const mark = document.createElement('span');
+    mark.className = 'brand-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.innerHTML = '<svg viewBox="0 0 100 100" style="color:#1f2328"><rect width="100" height="100" rx="22" style="fill:var(--accent)"/>'
+      + VAN_ART + '</svg>';
+    return h('p', { class: 'brand' }, mark, 'Van Stock');
+  }
 
   function fmtQty(qty, unit) {
     return unit === 'each' ? String(qty) : qty + ' ' + unit;
@@ -150,7 +178,7 @@
   function openDialog(build) {
     const dialog = h('dialog', { class: 'sheet' });
     const close = () => dialog.close();
-    dialog.append(h('div', { class: 'sheet-body' }, build(close)));
+    dialog.append(h('div', { class: 'sheet-handle', 'aria-hidden': 'true' }), h('div', { class: 'sheet-body' }, build(close)));
     dialog.addEventListener('click', (event) => {
       if (event.target === dialog) close();
     });
@@ -513,17 +541,29 @@
       render();
       window.scrollTo(0, 0);
     };
+    const choice = (id, title, meta, iconName, extraClass) => h('button', {
+      class: 'choice' + (extraClass ? ' ' + extraClass : ''),
+      type: 'button',
+      onclick: () => choose(id),
+    },
+    h('span', { class: 'choice-icon' }, icon(ICONS[iconName] || ICONS.blank)),
+    h('span', { class: 'choice-text' },
+      h('span', { class: 'choice-title' }, title),
+      h('span', { class: 'choice-meta' }, meta)),
+    h('span', { class: 'chevron', 'aria-hidden': 'true' }));
+
     return h('div', { class: 'screen' },
-      h('p', { class: 'brand' }, 'Van Stock'),
-      h('h1', null, 'What’s on your van?'),
-      h('p', { class: 'muted' }, 'Choose your trade for a ready-made list of parts, then just count what you carry.'),
-      h('div', { class: 'stack' },
-        VanStarters.map((trade) => h('button', {
-          class: 'btn btn-primary btn-wide',
-          type: 'button',
-          onclick: () => choose(trade.id),
-        }, trade.label)),
-        h('button', { class: 'btn btn-wide', type: 'button', onclick: () => choose('blank') }, 'Start with a blank list')));
+      brandMark(),
+      h('div', { class: 'hero' },
+        vanArt('hero-art', 58),
+        h('h1', null, 'What’s on your van?'),
+        h('p', { class: 'muted' }, 'Choose your trade for a ready-made list of parts, then just count what you carry.')),
+      h('div', { class: 'choices' },
+        VanStarters.map((trade) => {
+          const parts = trade.categories.reduce((n, c) => n + c.parts.length, 0);
+          return choice(trade.id, trade.label, parts + ' common parts', trade.id);
+        }),
+        choice('blank', 'Start with a blank list', 'Type in your own parts', 'blank', 'choice-blank')));
   }
 
   function setupListScreen() {
@@ -721,7 +761,7 @@
     refreshSetup();
 
     return h('div', { class: 'screen setup' },
-      h('p', { class: 'brand' }, 'Van Stock'),
+      brandMark(),
       h('h1', null, trade ? trade.label + ' parts' : 'What’s on your van?'),
       h('p', { class: 'muted' }, trade
         ? 'Open a category, then tap + or type how many you carry. Skip anything you don’t carry. Your progress saves as you go.'
@@ -767,8 +807,11 @@
       }, label)));
   }
 
-  function emptyMessage(text, action) {
-    return h('div', { class: 'empty' }, h('p', null, text), action || null);
+  function emptyMessage(text, action, iconName) {
+    return h('div', { class: 'empty' },
+      h('span', { class: 'empty-icon' }, icon(ICONS[iconName || 'stock'])),
+      h('p', null, text),
+      action || null);
   }
 
   /* ---------- Use tab ---------- */
@@ -805,10 +848,15 @@
     });
   }
 
-  function useRow(item) {
+  function rowWrapClass(item) {
+    if (store.isOut(item)) return 'row-wrap is-out';
+    return store.isLow(item) ? 'row-wrap is-low' : 'row-wrap';
+  }
+
+  function useRow(item, underHeading) {
     const out = store.isOut(item);
     const part = item.qty > 0 && item.qty < 1;
-    return h('li', { class: 'row-wrap' },
+    return h('li', { class: rowWrapClass(item) },
       h('button', {
         class: 'row row-main',
         type: 'button',
@@ -818,7 +866,7 @@
       },
       h('span', { class: 'row-text' },
         h('span', { class: 'row-name' }, item.name),
-        h('span', { class: 'row-meta' }, statusTag(item), item.category || null)),
+        h('span', { class: 'row-meta' }, statusTag(item), underHeading ? null : item.category || null)),
       h('span', { class: 'row-qty' }, fmtQty(item.qty, item.unit))),
       h('button', {
         class: 'use-btn',
@@ -869,9 +917,9 @@
     if (ui.filter === 'all' && !ui.search.trim()) {
       return groupByCategory(items).map(([name, group]) => h('section', null,
         h('h2', { class: 'section-title' }, name),
-        h('ul', { class: 'rows' }, group.map(useRow))));
+        h('ul', { class: 'rows' }, group.map((item) => useRow(item, true)))));
     }
-    return [h('ul', { class: 'rows' }, items.map(useRow))];
+    return [h('ul', { class: 'rows' }, items.map((item) => useRow(item, false)))];
   }
 
   function jobBar() {
@@ -947,7 +995,7 @@
   }
 
   function stockRow(item) {
-    return h('li', { class: 'row-wrap' },
+    return h('li', { class: rowWrapClass(item) },
       h('button', {
         class: 'row row-main',
         type: 'button',
@@ -1050,7 +1098,7 @@
 
   function historyView() {
     const log = store.state.log;
-    if (log.length === 0) return [emptyMessage('Nothing recorded yet. Parts you use will show here.')];
+    if (log.length === 0) return [emptyMessage('Nothing recorded yet. Parts you use will show here.', null, 'history')];
     const entries = log.slice(-ui.historyLimit).reverse();
     const days = new Map();
     entries.forEach((entry) => {
@@ -1185,10 +1233,23 @@
       id === 'stock' && lowCount > 0 ? h('span', { class: 'badge', 'aria-label': lowCount + ' low or out' }, String(lowCount)) : null)));
   }
 
+  function stockSummary() {
+    const items = store.state.items;
+    const out = items.filter((i) => store.isOut(i)).length;
+    const low = items.filter((i) => store.isLow(i) && !store.isOut(i)).length;
+    return h('div', { class: 'summary' },
+      h('span', { class: 'summary-pill' }, partCount(items.length) + ' on the van'),
+      low > 0 ? h('span', { class: 'summary-pill is-low' }, low + ' running low') : null,
+      out > 0 ? h('span', { class: 'summary-pill is-out' }, out + ' out') : null);
+  }
+
   function mainScreen() {
     const tab = TABS.find(([id]) => id === ui.tab);
     return h('div', { class: 'screen with-tabs' },
-      h('header', { class: 'top' }, h('p', { class: 'brand' }, 'Van Stock'), h('h1', null, tab[1] === 'Use' ? 'Record parts used' : tab[1])),
+      h('header', { class: 'top' },
+        brandMark(),
+        h('h1', null, tab[1] === 'Use' ? 'Record parts used' : tab[1]),
+        ui.tab === 'use' || ui.tab === 'stock' ? stockSummary() : null),
       tab[2](),
       navBar());
   }
