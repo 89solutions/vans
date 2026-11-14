@@ -17,6 +17,7 @@
     stockFilter: 'all',
     historyLimit: 100,
     setupFilter: '',
+    setupOpen: new Set(),
     quick: { more: false, category: '', unit: 'each', low: '' },
   };
 
@@ -529,6 +530,7 @@
     const trade = VanStarters.find((t) => t.id === store.state.setupTrade);
     const starterNames = new Set();
     const counters = [];
+    const tallies = [];
     const ownHeading = h('h2', { class: 'section-title' });
     const ownList = h('ul', { class: 'rows' });
     const finish = h('button', { class: 'btn btn-primary btn-wide', type: 'button' });
@@ -549,6 +551,7 @@
           item.category ? h('span', { class: 'row-meta' }, item.category) : null),
         h('span', { class: 'row-qty' }, fmtQty(item.qty, item.unit))))));
       counters.forEach((counter) => counter.refresh());
+      tallies.forEach((refreshTally) => refreshTally());
       finish.textContent = count === 0 ? (trade ? 'Count at least one part' : 'Add your first part above') : 'Finish setup (' + partCount(count) + ')';
       finish.disabled = count === 0;
     }
@@ -612,16 +615,46 @@
     let applyFilter = () => {};
     if (trade) {
       trade.categories.forEach((category) => category.parts.forEach((part) => starterNames.add(part.name.toLowerCase())));
+      // Each category opens on a tap, so a long list starts as a short index of categories.
       const sections = trade.categories.map((category) => {
         const rows = category.parts.map(partRow);
+        const list = h('ul', { class: 'rows' }, rows);
+        const tally = h('span', { class: 'category-tally' });
+        const toggle = h('button', {
+          class: 'category-toggle',
+          type: 'button',
+          'aria-expanded': 'false',
+          onclick: () => {
+            if (ui.setupOpen.has(category.name)) ui.setupOpen.delete(category.name);
+            else ui.setupOpen.add(category.name);
+            applyFilter();
+          },
+        },
+        h('span', { class: 'category-name' }, category.name),
+        ' ',
+        tally,
+        h('span', { class: 'chevron', 'aria-hidden': 'true' }));
+        tallies.push(() => {
+          const counted = category.parts.filter((part) => {
+            const item = store.findItem(part.name);
+            return item && item.qty > 0;
+          }).length;
+          tally.textContent = counted > 0 ? counted + ' of ' + category.parts.length : category.parts.length + ' parts';
+          tally.classList.toggle('has-count', counted > 0);
+        });
         return {
+          name: category.name,
           rows: rows,
           parts: category.parts,
-          el: h('section', null, h('h2', { class: 'section-title' }, category.name), h('ul', { class: 'rows' }, rows)),
+          list: list,
+          toggle: toggle,
+          el: h('section', null, h('h2', { class: 'category-heading' }, toggle), list),
         };
       });
       const noMatch = h('p', { class: 'muted', hidden: true }, 'Not on this list. Add it with the box above.');
       applyFilter = () => {
+        // While searching, every category with a match is shown open.
+        const searching = ui.setupFilter.trim() !== '';
         let shown = 0;
         sections.forEach((section) => {
           let inSection = 0;
@@ -630,6 +663,10 @@
             section.rows[index].hidden = !show;
             if (show) inSection += 1;
           });
+          const open = searching || ui.setupOpen.has(section.name);
+          section.list.hidden = !open;
+          section.toggle.setAttribute('aria-expanded', String(open));
+          section.toggle.disabled = searching;
           section.el.hidden = inSection === 0;
           shown += inSection;
         });
@@ -687,7 +724,7 @@
       h('p', { class: 'brand' }, 'Van Stock'),
       h('h1', null, trade ? trade.label + ' parts' : 'What’s on your van?'),
       h('p', { class: 'muted' }, trade
-        ? 'Tap + or type how many you carry. Skip anything you don’t carry. Your progress saves as you go.'
+        ? 'Open a category, then tap + or type how many you carry. Skip anything you don’t carry. Your progress saves as you go.'
         : 'Type each part and how many, then press Add. Your progress saves as you go.'),
       h('button', {
         class: 'link-btn',

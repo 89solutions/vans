@@ -1,5 +1,5 @@
 // Offline support: answer from the cache straight away, refresh the cache in the background.
-const CACHE = 'van-stock-v2';
+const CACHE = 'van-stock-v3';
 const FILES = [
   './',
   'index.html',

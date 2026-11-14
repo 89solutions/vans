@@ -352,6 +352,52 @@ button:disabled { cursor: default; }
   resize: vertical;
 }
 
+/* Starter list categories */
+.category-heading { margin: 0; }
+
+.category-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 1.05rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.category-toggle:disabled { cursor: default; color: inherit; }
+.category-toggle:disabled .chevron { display: none; }
+.category-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.category-tally {
+  flex: none;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.category-tally.has-count { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+.chevron {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin: -5px 4px 0;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.category-toggle[aria-expanded="true"] .chevron { margin-top: 5px; transform: rotate(-135deg); }
+
 /* Starter list counters */
 .part-row {
   display: flex;
