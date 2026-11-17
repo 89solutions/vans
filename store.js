@@ -17,7 +17,26 @@
   }
 
   function emptyState() {
-    return { version: 1, setupComplete: false, setupTrade: null, items: [], log: [], currentJob: '' };
+    // bays is null until asked during setup, and 0 for a van without numbered bays.
+    return { version: 1, setupComplete: false, setupTrade: null, bays: null, items: [], log: [], currentJob: '' };
+  }
+
+  const MAX_BAYS = 30;
+
+  function cleanBayCount(value) {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 0 || n > MAX_BAYS) {
+      throw new Error('Enter a number of bays from 0 to ' + MAX_BAYS + '.');
+    }
+    return n;
+  }
+
+  function cleanBay(value) {
+    if (value === null || value === undefined || value === '' || value === 0 || value === '0') return null;
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_BAYS) throw new Error('Choose a bay from the list.');
+    return n;
   }
 
   const UNIT_WORDS = {
@@ -103,6 +122,7 @@
       unit: UNITS.includes(raw.unit) ? raw.unit : 'each',
       qty: requireQty(raw.qty, 'Quantity', true),
       low: cleanLow(raw.low),
+      bay: cleanBay(raw.bay),
     };
   }
 
@@ -132,6 +152,7 @@
       version: 1,
       setupComplete: Boolean(raw.setupComplete),
       setupTrade: raw.setupTrade ? String(raw.setupTrade) : null,
+      bays: cleanBayCount(raw.bays),
       items: raw.items.map(cleanItem),
       log: raw.log.map(cleanEntry),
       currentJob: String(raw.currentJob || ''),
@@ -176,6 +197,12 @@
       }
     }
 
+    function assertBayExists(item) {
+      if (item.bay !== null && (!state.bays || item.bay > state.bays)) {
+        throw new Error(state.bays ? 'Choose a bay from 1 to ' + state.bays + '.' : 'Set up your van’s bays first.');
+      }
+    }
+
     function addLog(item, type, delta) {
       const entry = {
         id: uid(),
@@ -200,6 +227,7 @@
         const name = cleanName(fields.name);
         assertNameFree(name);
         const item = cleanItem({ ...fields, id: uid(), name: name });
+        assertBayExists(item);
         state.items.push(item);
         if (state.setupComplete && item.qty > 0) addLog(item, 'added', item.qty);
         save();
@@ -242,6 +270,22 @@
         }
       },
 
+      // Parts in bays beyond the new count lose their bay. Returns how many did.
+      setBays(count) {
+        const bays = cleanBayCount(count);
+        if (bays === null) throw new Error('Enter a number of bays from 0 to ' + MAX_BAYS + '.');
+        let cleared = 0;
+        state.items.forEach((item) => {
+          if (item.bay !== null && item.bay > bays) {
+            item.bay = null;
+            cleared += 1;
+          }
+        });
+        state.bays = bays;
+        save();
+        return cleared;
+      },
+
       setSetupTrade(trade) {
         state.setupTrade = trade;
         save();
@@ -252,6 +296,7 @@
         const name = cleanName(fields.name);
         assertNameFree(name, id);
         const next = cleanItem({ ...fields, id: id, name: name });
+        assertBayExists(next);
         const delta = round(next.qty - item.qty);
         Object.assign(item, next);
         if (delta !== 0 && state.setupComplete) addLog(item, 'correction', delta);
@@ -379,5 +424,5 @@
     };
   }
 
-  global.VanStore = { createStore: createStore, parseItemLine: parseItemLine, UNITS: UNITS };
+  global.VanStore = { createStore: createStore, parseItemLine: parseItemLine, UNITS: UNITS, MAX_BAYS: MAX_BAYS };
 })(window);

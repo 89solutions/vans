@@ -2,7 +2,8 @@
 
 A phone-first web app for tradespeople to track the parts they carry on their van.
 
-- **First use:** choose a trade and count parts on a ready-made list, or start from a blank list.
+- **First use:** say how many bays the van has, then choose a trade and count parts on a ready-made list, or start from a blank list.
+- **Bays:** each part can be given a bay, shown on its row. Filter the Use tab by bay, or search for `bay 2`. Change the number of bays on the More tab.
 - **Quick add:** type `15mm elbow 12` or `twin and earth 50m` in one box, or paste a whole list. Works in setup and on the Stock tab.
 - **On the job:** tap **Use 1** beside a part, or tap the part to enter a larger amount. Stock is deducted straight away, with an Undo.
 - **Current job:** optionally type a job or address, and each use is recorded against it.

@@ -360,6 +360,7 @@ button:disabled { cursor: default; }
 }
 
 .tag-low { background: var(--low-bg); color: var(--low-ink); }
+.tag-bay { background: var(--surface-3); color: var(--ink); }
 .tag-out { background: var(--danger); color: var(--danger-ink); }
 
 .use-btn,
@@ -452,6 +453,30 @@ button:disabled { cursor: default; }
 .choice-blank { background: transparent; border-style: dashed; border-color: var(--line-strong); box-shadow: none; }
 .choice-blank .choice-icon { background: var(--surface-2); }
 .choice .chevron { transform: rotate(-45deg); margin: 0 4px 0 0; color: var(--muted); }
+
+/* Bays */
+.field-label { font-size: 0.88rem; font-weight: 700; }
+
+.bay-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+  color: var(--muted);
+}
+
+.bay-note .link-btn { align-self: center; color: var(--ink); }
+
+.bay-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+}
+
+.bay-bar select { border-color: transparent; box-shadow: var(--shadow-1); font-weight: 700; }
 
 /* First use: counting parts */
 .setup { padding-bottom: 112px; }

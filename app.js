@@ -18,7 +18,8 @@
     historyLimit: 100,
     setupFilter: '',
     setupOpen: new Set(),
-    quick: { more: false, category: '', unit: 'each', low: '' },
+    quick: { more: false, category: '', unit: 'each', low: '', bay: '' },
+    editBays: false,
   };
 
   function openStorage() {
@@ -114,6 +115,9 @@
   }
 
   function matches(item, search) {
+    // "bay 3" finds exactly what is in bay 3, rather than anything containing a 3.
+    const bay = search.trim().match(/^bay\s*(\d+)$/i);
+    if (bay) return item.bay === Number(bay[1]);
     const text = (item.name + ' ' + item.category).toLowerCase();
     return search.toLowerCase().split(/\s+/).filter(Boolean).every((word) => text.includes(word));
   }
@@ -136,6 +140,102 @@
     if (store.isOut(item)) return h('span', { class: 'tag tag-out' }, 'Out');
     if (store.isLow(item)) return h('span', { class: 'tag tag-low' }, 'Low');
     return null;
+  }
+
+  /* ---------- Bays ---------- */
+
+  function bayCount() {
+    return store.state.bays || 0;
+  }
+
+  function bayTag(item) {
+    return item.bay ? h('span', { class: 'tag tag-bay' }, 'Bay ' + item.bay) : null;
+  }
+
+  function baySelect(props, value) {
+    const options = [h('option', { value: '', selected: !value }, 'No bay')];
+    for (let bay = 1; bay <= bayCount(); bay++) {
+      options.push(h('option', { value: String(bay), selected: Number(value) === bay }, 'Bay ' + bay));
+    }
+    return h('select', props, options);
+  }
+
+  // A number picker shared by setup and the More tab.
+  function bayCountPicker(start) {
+    const input = h('input', {
+      class: 'stepper-input',
+      type: 'text',
+      inputmode: 'numeric',
+      autocomplete: 'off',
+      'aria-label': 'Number of bays',
+      value: String(start),
+      onfocus: (event) => event.target.select(),
+    });
+    const step = (change) => {
+      const next = (parseInt(input.value, 10) || 0) + change;
+      input.value = String(Math.min(VanStore.MAX_BAYS, Math.max(1, next)));
+    };
+    return {
+      input: input,
+      el: h('div', { class: 'stepper' },
+        h('button', { class: 'stepper-btn', type: 'button', 'aria-label': 'One fewer bay', onclick: () => step(-1) }, '−'),
+        input,
+        h('button', { class: 'stepper-btn', type: 'button', 'aria-label': 'One more bay', onclick: () => step(1) }, '+')),
+    };
+  }
+
+  function wholeBays(value) {
+    const text = String(value).trim();
+    if (!/^\d+$/.test(text) || Number(text) < 1) throw new Error('Enter how many bays, from 1 to ' + VanStore.MAX_BAYS + '.');
+    return Number(text);
+  }
+
+  function baysDialog() {
+    openDialog((close) => {
+      const picker = bayCountPicker(bayCount() || 4);
+      const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
+      const apply = async (count) => {
+        const affected = store.state.items.filter((i) => i.bay !== null && i.bay > count).length;
+        if (affected > 0) {
+          close();
+          const yes = await confirmDialog({
+            title: 'Remove bays with parts in them?',
+            body: partCount(affected) + ' will no longer have a bay. You can give them a new one on the Stock tab.',
+            confirmLabel: 'Remove bays',
+            danger: true,
+          });
+          if (!yes) return;
+        }
+        store.setBays(count);
+        close();
+        render();
+        showToast(count === 0 ? 'Bays switched off.' : 'Your van has ' + count + (count === 1 ? ' bay.' : ' bays.'));
+      };
+      return h('form', {
+        novalidate: true,
+        onsubmit: (event) => {
+          event.preventDefault();
+          try {
+            apply(wholeBays(picker.input.value));
+          } catch (err) {
+            error.textContent = err.message;
+            error.hidden = false;
+          }
+        },
+      },
+      h('h2', null, 'Bays in your van'),
+      h('p', { class: 'muted' }, 'Count the shelving units or racking sections you keep parts in.'),
+      picker.el,
+      error,
+      h('div', { class: 'sheet-actions' },
+        h('button', { class: 'btn', type: 'button', onclick: close }, 'Cancel'),
+        h('button', { class: 'btn btn-primary', type: 'submit' }, 'Save')),
+      bayCount() > 0 ? h('button', {
+        class: 'btn btn-quiet-danger',
+        type: 'button',
+        onclick: () => apply(0),
+      }, 'I don’t use bays') : null);
+    });
   }
 
   function attempt(action) {
@@ -298,6 +398,9 @@
             name: 'low', type: 'text', inputmode: 'decimal', autocomplete: 'off',
             value: v.low === null || v.low === undefined ? '' : String(v.low),
           }))),
+      bayCount() > 0 ? h('label', { class: 'field' },
+        h('span', null, 'Bay (optional)'),
+        baySelect({ name: 'bay' }, v.bay)) : null,
       h('datalist', { id: 'category-options' }, store.categories().map((c) => h('option', { value: c }))),
     ];
   }
@@ -310,6 +413,7 @@
       unit: data.get('unit'),
       category: data.get('category'),
       low: data.get('low'),
+      bay: data.get('bay'),
     };
   }
 
@@ -361,7 +465,7 @@
   /* ---------- Quick add ---------- */
 
   function quickDefaults() {
-    return { category: ui.quick.category, unit: ui.quick.unit, low: ui.quick.low };
+    return { category: ui.quick.category, unit: ui.quick.unit, low: ui.quick.low, bay: bayCount() > 0 ? ui.quick.bay : '' };
   }
 
   function partCount(count) {
@@ -410,7 +514,7 @@
     });
   }
 
-  function quickAddBox({ initial, onAdded }) {
+  function quickAddBox({ initial, onAdded, showBay }) {
     const feedback = h('p', { class: 'quick-feedback', role: 'status', hidden: true });
     const setFeedback = (text, isError) => {
       feedback.textContent = text;
@@ -469,9 +573,17 @@
               ui.quick.unit = event.target.value;
             },
           }, VanStore.UNITS.map((unit) => h('option', { value: unit, selected: unit === ui.quick.unit }, unit))))),
-      h('label', { class: 'field' }, h('span', null, 'Warn when down to'), lowInput),
+      h('div', { class: 'field-row' },
+        h('label', { class: 'field' }, h('span', null, 'Warn when down to'), lowInput),
+        bayCount() > 0 && showBay !== false ? h('label', { class: 'field' },
+          h('span', null, 'Bay'),
+          baySelect({
+            onchange: (event) => {
+              ui.quick.bay = event.target.value;
+            },
+          }, ui.quick.bay)) : null),
       categoryOptions,
-      h('p', { class: 'muted small' }, 'Category and unit stay set for the next part, which helps when working through one shelf.'));
+      h('p', { class: 'muted small' }, 'These stay set for the next part, which helps when working through one shelf or bay.'));
 
     return h('form', {
       class: 'card quick-add',
@@ -534,6 +646,45 @@
 
   /* ---------- First use: inventory setup ---------- */
 
+  function baysScreen() {
+    const picker = bayCountPicker(bayCount() || 4);
+    const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
+    const save = (count) => {
+      const cleared = store.setBays(count);
+      ui.editBays = false;
+      ui.quick.bay = '';
+      render();
+      window.scrollTo(0, 0);
+      if (cleared > 0) showToast(partCount(cleared) + ' no longer have a bay.');
+    };
+    return h('div', { class: 'screen' },
+      brandMark(),
+      h('div', { class: 'hero' },
+        vanArt('hero-art', 58),
+        h('h1', null, 'How many bays are in your van?'),
+        h('p', { class: 'muted' },
+          'Bays are the shelving units or racking sections you keep parts in. Number them however suits you, '
+          + 'such as from the back doors forward. Then you can note which bay each part lives in.')),
+      h('form', {
+        class: 'card',
+        novalidate: true,
+        onsubmit: (event) => {
+          event.preventDefault();
+          try {
+            save(wholeBays(picker.input.value));
+          } catch (err) {
+            error.textContent = err.message;
+            error.hidden = false;
+          }
+        },
+      },
+      h('p', { class: 'field-label' }, 'Number of bays'),
+      picker.el,
+      error,
+      h('button', { class: 'btn btn-primary btn-wide', type: 'submit' }, 'Continue')),
+      h('button', { class: 'btn btn-wide', type: 'button', onclick: () => save(0) }, 'Skip: I don’t use bays'));
+  }
+
   function tradeScreen() {
     const choose = (trade) => {
       store.setSetupTrade(trade);
@@ -558,6 +709,17 @@
         vanArt('hero-art', 58),
         h('h1', null, 'What’s on your van?'),
         h('p', { class: 'muted' }, 'Choose your trade for a ready-made list of parts, then just count what you carry.')),
+      h('div', { class: 'bay-note' },
+        h('span', null, bayCount() > 0 ? 'Your van has ' + bayCount() + (bayCount() === 1 ? ' bay.' : ' bays.') : 'No bays set up.'),
+        h('button', {
+          class: 'link-btn',
+          type: 'button',
+          onclick: () => {
+            ui.editBays = true;
+            render();
+            window.scrollTo(0, 0);
+          },
+        }, 'Change')),
       h('div', { class: 'choices' },
         VanStarters.map((trade) => {
           const parts = trade.categories.reduce((n, c) => n + c.parts.length, 0);
@@ -588,7 +750,7 @@
         },
         h('span', { class: 'row-text' },
           h('span', { class: 'row-name' }, item.name),
-          item.category ? h('span', { class: 'row-meta' }, item.category) : null),
+          h('span', { class: 'row-meta' }, bayTag(item), item.category || null)),
         h('span', { class: 'row-qty' }, fmtQty(item.qty, item.unit))))));
       counters.forEach((counter) => counter.refresh());
       tallies.forEach((refreshTally) => refreshTally());
@@ -603,7 +765,8 @@
       };
       const setCount = (value) => {
         try {
-          store.setStarterCount(part, String(value).trim() === '' ? 0 : value);
+          // A newly counted part goes into the bay chosen at the top of the screen.
+          store.setStarterCount({ ...part, bay: quickDefaults().bay }, String(value).trim() === '' ? 0 : value);
         } catch (err) {
           showToast(err.message);
         }
@@ -625,10 +788,11 @@
         'aria-label': 'One fewer ' + part.name,
         onclick: () => setCount(Math.max(0, held() - 1)),
       }, '−');
+      const meta = h('span', { class: 'row-meta' });
       const row = h('li', { class: 'part-row' },
         h('span', { class: 'row-text' },
           h('span', { class: 'row-name' }, part.name),
-          part.unit !== 'each' ? h('span', { class: 'row-meta' }, part.unit) : null),
+          meta),
         h('span', { class: 'counter' },
           minus,
           input,
@@ -643,8 +807,10 @@
         row: row,
         refresh: () => {
           const qty = held();
+          const item = store.findItem(part.name);
           input.value = qty > 0 ? String(qty) : '';
           minus.disabled = qty <= 0;
+          meta.replaceChildren(...[item ? bayTag(item) : null, part.unit !== 'each' ? part.unit : null].filter(Boolean));
           row.classList.toggle('counted', qty > 0);
         },
       });
@@ -731,11 +897,23 @@
     }
 
     const box = quickAddBox({
+      showBay: false,
       onAdded: () => {
         fileTypedParts();
         refreshSetup();
       },
     });
+
+    // During setup the bay is chosen once at the top, for counting and typing alike.
+    const bayBar = bayCount() > 0 ? h('div', { class: 'bay-bar' },
+      h('label', { class: 'field' },
+        h('span', null, 'Putting parts in'),
+        baySelect({
+          onchange: (event) => {
+            ui.quick.bay = event.target.value;
+          },
+        }, ui.quick.bay)),
+      h('p', { class: 'muted small' }, 'Work one bay at a time: choose it here, then count or add what’s in it.')) : null;
 
     finish.addEventListener('click', () => {
       try {
@@ -775,6 +953,7 @@
           window.scrollTo(0, 0);
         },
       }, trade ? 'Choose a different list' : 'Use a ready-made list instead'),
+      bayBar,
       box,
       ownHeading,
       ownList,
@@ -866,7 +1045,7 @@
       },
       h('span', { class: 'row-text' },
         h('span', { class: 'row-name' }, item.name),
-        h('span', { class: 'row-meta' }, statusTag(item), underHeading ? null : item.category || null)),
+        h('span', { class: 'row-meta' }, statusTag(item), bayTag(item), underHeading ? null : item.category || null)),
       h('span', { class: 'row-qty' }, fmtQty(item.qty, item.unit))),
       h('button', {
         class: 'use-btn',
@@ -898,7 +1077,8 @@
     } else if (ui.filter === 'all') {
       items = sortedItems();
     } else {
-      items = sortedItems().filter((i) => i.category === ui.filter);
+      const bay = ui.filter.startsWith('bay:') ? Number(ui.filter.slice(4)) : null;
+      items = sortedItems().filter((i) => (bay ? i.bay === bay : i.category === ui.filter));
     }
     items = items.filter((i) => matches(i, ui.search));
 
@@ -952,7 +1132,10 @@
     const list = h('div', { class: 'list' });
     const fill = () => list.replaceChildren(...useList());
     fill();
+    // Only bays that hold something get a chip, so the row stays short.
+    const usedBays = [...new Set(store.state.items.map((i) => i.bay).filter(Boolean))].sort((a, b) => a - b);
     const options = [['all', 'All'], ['recent', 'Recent']]
+      .concat(usedBays.map((bay) => ['bay:' + bay, 'Bay ' + bay]))
       .concat(store.categories().map((c) => [c, c]));
     if (ui.filter !== 'all' && !options.some(([id]) => id === ui.filter)) ui.filter = 'all';
     return [
@@ -1007,6 +1190,7 @@
         h('span', { class: 'row-name' }, item.name),
         h('span', { class: 'row-meta' },
           statusTag(item),
+          bayTag(item),
           item.category || null,
           item.low !== null ? h('span', null, 'warn at ' + item.low) : null)),
       h('span', { class: 'row-qty' }, fmtQty(item.qty, item.unit))),
@@ -1167,7 +1351,16 @@
         if (file) restoreBackup(file);
       },
     });
+    const bays = bayCount();
+    const placed = store.state.items.filter((i) => i.bay !== null).length;
     return [
+      h('section', { class: 'card' },
+        h('h2', null, 'Van bays'),
+        h('p', { class: 'muted' }, bays > 0
+          ? 'Your van has ' + bays + (bays === 1 ? ' bay' : ' bays') + ', and ' + partCount(placed) + ' have a bay set. '
+            + 'Set a part’s bay by tapping it on the Stock tab.'
+          : 'Number the shelving units or racking in your van, so each part can show which bay it lives in.'),
+        h('button', { class: 'btn btn-wide', type: 'button', onclick: baysDialog }, bays > 0 ? 'Change number of bays' : 'Set up bays')),
       h('section', { class: 'card' },
         h('h2', null, 'Backup'),
         h('p', { class: 'muted' },
@@ -1196,7 +1389,7 @@
               ui.filter = 'all';
               ui.stockSearch = '';
               ui.stockFilter = 'all';
-              ui.quick = { more: false, category: '', unit: 'each', low: '' };
+              ui.quick = { more: false, category: '', unit: 'each', low: '', bay: '' };
               render();
               window.scrollTo(0, 0);
             }
@@ -1261,6 +1454,7 @@
     const chipScroll = chips ? chips.scrollLeft : 0;
 
     if (store.state.setupComplete) root.replaceChildren(mainScreen());
+    else if (ui.editBays || (store.state.bays === null && !store.state.setupTrade)) root.replaceChildren(baysScreen());
     else root.replaceChildren(store.state.setupTrade ? setupListScreen() : tradeScreen());
 
     const newChips = root.querySelector('.chips');
