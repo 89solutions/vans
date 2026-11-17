@@ -21,7 +21,7 @@
     return { version: 1, setupComplete: false, setupTrade: null, bays: null, items: [], log: [], currentJob: '' };
   }
 
-  const MAX_BAYS = 30;
+  const MAX_BAYS = 100;
 
   function cleanBayCount(value) {
     if (value === null || value === undefined) return null;
