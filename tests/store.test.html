@@ -254,6 +254,78 @@
           if (names.size < 50) throw new Error(trade.id + ' only has ' + names.size + ' parts');
         });
       },
+      'bays start unasked, and can be set or switched off': () => {
+        const store = VanStore.createStore(memoryStorage());
+        equal(store.state.bays, null);
+        store.setBays(4);
+        equal(store.state.bays, 4);
+        store.setBays(0);
+        equal(store.state.bays, 0);
+        throwsWith(() => store.setBays(-1), 'from 0');
+        throwsWith(() => store.setBays(2.5), 'from 0');
+        throwsWith(() => store.setBays(VanStore.MAX_BAYS + 1), 'from 0');
+        throwsWith(() => store.setBays(null), 'from 0');
+        equal(store.state.bays, 0);
+      },
+      'parts can be given a bay that exists, or none': () => {
+        const { store } = setup();
+        store.setBays(3);
+        equal(store.addItem({ name: 'Tee', qty: 2, bay: '2' }).bay, 2);
+        equal(store.addItem({ name: 'Valve', qty: 1, bay: '' }).bay, null);
+        throwsWith(() => store.addItem({ name: 'Clip', qty: 1, bay: 4 }), '1 to 3');
+        throwsWith(() => store.addItem({ name: 'Clip', qty: 1, bay: 'x' }), 'bay');
+        const tee = store.findItem('Tee');
+        store.updateItem(tee.id, { ...tee, bay: '3' });
+        equal(tee.bay, 3);
+        throwsWith(() => store.updateItem(tee.id, { ...tee, bay: '9' }), '1 to 3');
+        equal(tee.bay, 3);
+      },
+      'a bay is refused when the van has no bays': () => {
+        const { store } = setup();
+        throwsWith(() => store.addItem({ name: 'Tee', qty: 1, bay: 1 }), 'bays first');
+        store.setBays(0);
+        throwsWith(() => store.addItem({ name: 'Tee', qty: 1, bay: 1 }), 'bays first');
+      },
+      'fewer bays clears the bay from parts in removed bays': () => {
+        const { store } = setup();
+        store.setBays(4);
+        store.addItem({ name: 'A', qty: 1, bay: 1 });
+        store.addItem({ name: 'B', qty: 1, bay: 3 });
+        store.addItem({ name: 'C', qty: 1, bay: 4 });
+        equal(store.setBays(2), 2);
+        equal(store.findItem('A').bay, 1);
+        equal(store.findItem('B').bay, null);
+        equal(store.findItem('C').bay, null);
+      },
+      'quick add, pasted lists and starter counts take the chosen bay': () => {
+        const store = VanStore.createStore(memoryStorage());
+        store.setBays(3);
+        equal(store.addFromLine('Elbow 12', { bay: '2' }).bay, 2);
+        store.addLines('Tee 4\nClip 9', { bay: '3' });
+        equal(store.findItem('Clip').bay, 3);
+        const part = { name: '15mm copper pipe', unit: 'm', category: 'Pipe' };
+        store.setStarterCount({ ...part, bay: '1' }, 10);
+        equal(store.findItem('15mm copper pipe').bay, 1);
+        store.setStarterCount({ ...part, bay: '2' }, 12);
+        equal(store.findItem('15mm copper pipe').bay, 1);
+        equal(store.findItem('15mm copper pipe').qty, 12);
+      },
+      'bays survive a reload, and older saved data still loads': () => {
+        const storage = memoryStorage();
+        const store = VanStore.createStore(storage);
+        store.setBays(2);
+        store.addItem({ name: 'Tee', qty: 1, bay: 2 });
+        const reopened = VanStore.createStore(storage);
+        equal(reopened.state.bays, 2);
+        equal(reopened.findItem('Tee').bay, 2);
+        const old = memoryStorage({ 'vans.state.v1': JSON.stringify({
+          version: 1, setupComplete: true, items: [{ id: 'a', name: 'Tee', qty: 1, unit: 'each', category: '', low: null }],
+          log: [], currentJob: '',
+        }) });
+        const oldStore = VanStore.createStore(old);
+        equal(oldStore.state.bays, null);
+        equal(oldStore.findItem('Tee').bay, null);
+      },
       'a bad backup is refused and changes nothing': () => {
         const { store, item } = setup();
         throwsWith(() => store.importJson('not json'), 'not a Van Stock');
