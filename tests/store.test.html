@@ -263,9 +263,12 @@
         equal(store.state.bays, 0);
         throwsWith(() => store.setBays(-1), 'from 0');
         throwsWith(() => store.setBays(2.5), 'from 0');
-        throwsWith(() => store.setBays(VanStore.MAX_BAYS + 1), 'from 0');
+        throwsWith(() => store.setBays(101), 'from 0 to 100');
         throwsWith(() => store.setBays(null), 'from 0');
         equal(store.state.bays, 0);
+        store.setBays(100);
+        const part = store.addItem({ name: 'Back corner part', qty: 1, bay: 100 });
+        equal(part.bay, 100);
       },
       'parts can be given a bay that exists, or none': () => {
         const { store } = setup();
