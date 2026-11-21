@@ -234,13 +234,47 @@
         equal(store.state.log.length, 0);
         throwsWith(() => store.setStarterCount(part, 'lots'), 'number');
       },
-      'the chosen trade survives a reload and a reset clears it': () => {
+      'after setup a starter count of 0 keeps the part as out of stock': () => {
+        const { store } = setup();
+        const part = { name: 'Starter part', unit: 'each', category: 'Fittings' };
+        const latest = () => store.state.log[store.state.log.length - 1];
+        store.setStarterCount(part, 2);
+        equal(latest().type, 'added');
+        store.setStarterCount(part, 0);
+        equal(store.findItem('Starter part').qty, 0);
+        equal(latest().type, 'correction');
+      },
+      'the chosen trades survive a reload and a reset clears them': () => {
         const storage = memoryStorage();
         const store = VanStore.createStore(storage);
-        store.setSetupTrade('plumber');
-        equal(VanStore.createStore(storage).state.setupTrade, 'plumber');
+        equal(store.state.setupTrades, null);
+        store.setSetupTrades(['plumber', 'electrician']);
+        equal(VanStore.createStore(storage).state.setupTrades.join(), 'plumber,electrician');
+        store.setSetupTrades([]);
+        equal(VanStore.createStore(storage).state.setupTrades.length, 0);
         store.reset();
-        equal(store.state.setupTrade, null);
+        equal(store.state.setupTrades, null);
+      },
+      'older data with one trade, or a blank list, still loads': () => {
+        const saved = (trade) => memoryStorage({ 'vans.state.v1': JSON.stringify({ items: [], log: [], setupTrade: trade }) });
+        equal(VanStore.createStore(saved('plumber')).state.setupTrades.join(), 'plumber');
+        equal(VanStore.createStore(saved('blank')).state.setupTrades.length, 0);
+        equal(VanStore.createStore(saved(null)).state.setupTrades, null);
+      },
+      'combined trade lists merge categories and keep shared parts once': () => {
+        const a = { categories: [{ name: 'Fittings', parts: [{ name: 'Elbow', unit: 'each', category: 'Fittings' }] },
+          { name: 'Tape', parts: [{ name: 'PTFE tape', unit: 'roll', category: 'Tape' }] }] };
+        const b = { categories: [{ name: 'Fittings', parts: [{ name: 'Tee', unit: 'each', category: 'Fittings' }] },
+          { name: 'Sundries', parts: [{ name: 'ptfe TAPE', unit: 'roll', category: 'Sundries' }] }] };
+        const combined = VanStore.combineLists([a, b]);
+        equal(combined.map((c) => c.name).join(), 'Fittings,Tape');
+        equal(combined[0].parts.map((p) => p.name).join(), 'Elbow,Tee');
+        const all = VanStore.combineLists(VanStarters);
+        const names = new Set();
+        all.forEach((c) => c.parts.forEach((p) => {
+          if (names.has(p.name.toLowerCase())) throw new Error('repeats ' + p.name);
+          names.add(p.name.toLowerCase());
+        }));
       },
       'starter lists have usable, unique parts': () => {
         VanStarters.forEach((trade) => {
