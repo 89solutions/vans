@@ -234,6 +234,43 @@
         equal(store.state.log.length, 0);
         throwsWith(() => store.setStarterCount(part, 'lots'), 'number');
       },
+      'barcodes link to one part and are found again': () => {
+        const { store, item } = setup();
+        equal(item.barcodes.length, 0);
+        store.linkBarcode(item.id, ' 5012345678900 ');
+        store.linkBarcode(item.id, '5012345678900');
+        equal(item.barcodes.join(), '5012345678900');
+        equal(store.findByBarcode('5012345678900').id, item.id);
+        equal(store.findByBarcode('9999'), undefined);
+        equal(store.findByBarcode(''), undefined);
+        const other = store.addItem({ name: 'Tee', qty: 1 });
+        throwsWith(() => store.linkBarcode(other.id, '5012345678900'), 'already linked to Elbow');
+        throwsWith(() => store.addItem({ name: 'Copy', qty: 1, barcodes: ['5012345678900'] }), 'already linked');
+        throwsWith(() => store.linkBarcode(other.id, '  '), 'Scan or type');
+        store.unlinkBarcode(item.id, '5012345678900');
+        equal(store.findByBarcode('5012345678900'), undefined);
+        store.linkBarcode(other.id, '5012345678900');
+        equal(store.findByBarcode('5012345678900').id, other.id);
+      },
+      'a 12 digit UPC code matches the same 13 digit EAN code': () => {
+        const { store, item } = setup();
+        store.linkBarcode(item.id, '012345678905');
+        equal(item.barcodes[0], '0012345678905');
+        equal(store.findByBarcode('0012345678905').id, item.id);
+        equal(store.findByBarcode('012345678905').id, item.id);
+      },
+      'editing a part keeps its barcodes, and new parts can start with one': () => {
+        const { store, item, storage } = setup();
+        store.linkBarcode(item.id, 'ABC-123');
+        store.updateItem(item.id, { name: 'Elbow 15mm', qty: 10, unit: 'each' });
+        equal(item.barcodes.join(), 'ABC-123');
+        const added = store.addFromLine('22mm tee 4', { barcodes: ['5000000000001'] });
+        equal(added.barcodes.join(), '5000000000001');
+        equal(VanStore.createStore(storage).findByBarcode('ABC-123').name, 'Elbow 15mm');
+        const backup = VanStore.createStore(memoryStorage());
+        backup.importJson(store.exportJson());
+        equal(backup.findByBarcode('5000000000001').name, '22mm tee');
+      },
       'after setup a starter count of 0 keeps the part as out of stock': () => {
         const { store } = setup();
         const part = { name: 'Starter part', unit: 'each', category: 'Fittings' };
