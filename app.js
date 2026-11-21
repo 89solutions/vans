@@ -88,6 +88,8 @@
     handyman: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/>',
     locksmith: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14 9l2 2"/>',
     blank: '<path d="M12 5v14M5 12h14"/>',
+    scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>'
+      + '<path d="M7 8v8M10 8v8M14 8v8M17 8v8"/>',
   };
 
   // The van from the app icon, drawn in the text colour on an amber tile.
@@ -134,6 +136,11 @@
     // "bay 3" finds exactly what is in bay 3, rather than anything containing a 3.
     const bay = search.trim().match(/^bay\s*(\d+)$/i);
     if (bay) return item.bay === Number(bay[1]);
+    // A known barcode, typed or from a Bluetooth scanner, finds its part.
+    if (/^\s*\d{8,}\s*$/.test(search)) {
+      const owner = store.findByBarcode(search);
+      if (owner) return owner.id === item.id;
+    }
     const text = (item.name + ' ' + item.category).toLowerCase();
     return search.toLowerCase().split(/\s+/).filter(Boolean).every((word) => text.includes(word));
   }
@@ -433,6 +440,27 @@
     };
   }
 
+  // The barcodes linked to a part, each removable, with a button to scan another.
+  function barcodeList(item, onAdd) {
+    const rows = h('ul', { class: 'barcode-list' });
+    const fill = () => rows.replaceChildren(...item.barcodes.map((code) => h('li', null,
+      h('span', { class: 'barcode-code' }, code),
+      h('button', {
+        class: 'link-btn',
+        type: 'button',
+        'aria-label': 'Remove barcode ' + code,
+        onclick: () => {
+          store.unlinkBarcode(item.id, code);
+          fill();
+        },
+      }, 'Remove'))));
+    fill();
+    return h('div', { class: 'barcodes' },
+      h('span', { class: 'field-label' }, 'Barcodes'),
+      rows,
+      h('button', { class: 'btn btn-icon', type: 'button', onclick: onAdd }, icon(ICONS.scan), item.barcodes.length ? 'Scan another barcode' : 'Scan a barcode'));
+  }
+
   function itemDialog(item, { after }) {
     const refresh = after || render;
     openDialog((close) => {
@@ -454,6 +482,18 @@
       },
       h('h2', null, 'Edit item'),
       itemFields(item),
+      barcodeList(item, () => {
+        close();
+        scanSheet({
+          title: 'Scan a barcode for ' + item.name,
+          onCode: (code) => {
+            if (attempt(() => store.linkBarcode(item.id, code))) {
+              refresh();
+              showToast('Barcode saved for ' + item.name + '.');
+            }
+          },
+        });
+      }),
       error,
       h('div', { class: 'sheet-actions' },
         h('button', { class: 'btn', type: 'button', onclick: close }, 'Cancel'),
@@ -476,6 +516,179 @@
         },
       }, 'Delete item'));
     });
+  }
+
+  /* ---------- Barcodes ---------- */
+
+  // Opens the camera and hands back the first barcode read, or one typed in.
+  // A Bluetooth scanner types into the box and presses Enter, so that works too.
+  function scanSheet({ title, onCode }) {
+    let scan = null;
+    const dialog = openDialog((close) => {
+      const video = h('video', { class: 'scan-video', 'aria-hidden': 'true' });
+      const viewfinder = h('div', { class: 'scan-view' }, video, h('span', { class: 'scan-frame', 'aria-hidden': 'true' }));
+      const status = h('p', { class: 'muted small', role: 'status' }, 'Starting the camera…');
+      const input = h('input', {
+        name: 'code',
+        type: 'text',
+        autocomplete: 'off',
+        enterkeyhint: 'search',
+        'aria-label': 'Barcode number',
+        placeholder: 'Or type the barcode number',
+      });
+      const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
+      const finish = (code) => {
+        close();
+        onCode(code);
+      };
+      scan = VanScanner.start(video, {
+        onReady: () => {
+          status.textContent = 'Hold the barcode inside the box. It reads by itself.';
+        },
+        onCode: (code) => {
+          if (navigator.vibrate) navigator.vibrate(60);
+          finish(code);
+        },
+        onError: (message) => {
+          viewfinder.hidden = true;
+          status.textContent = message;
+        },
+      });
+      return h('form', {
+        novalidate: true,
+        onsubmit: (event) => {
+          event.preventDefault();
+          if (!input.value.trim()) {
+            error.textContent = 'Type the number under the barcode.';
+            error.hidden = false;
+            return;
+          }
+          finish(input.value.trim());
+        },
+      },
+      h('h2', null, title),
+      viewfinder,
+      status,
+      h('div', { class: 'quick-line' }, input, h('button', { class: 'btn', type: 'submit' }, 'Find')),
+      error,
+      // Starting on Close keeps the phone keyboard from covering the camera.
+      h('button', { class: 'btn btn-wide', type: 'button', autofocus: true, onclick: close }, 'Close'));
+    });
+    dialog.addEventListener('close', () => scan.stop());
+  }
+
+  // What a scan does depends on where it started: record a use, restock, or count during setup.
+  const SCAN_TITLES = { use: 'Scan a part you used', restock: 'Scan a part to restock', count: 'Scan a part on the van' };
+
+  function scanFor(purpose, after) {
+    scanSheet({
+      title: SCAN_TITLES[purpose],
+      onCode: (code) => {
+        const item = store.findByBarcode(code);
+        if (item) actOnScan(item, purpose, after);
+        else newBarcodeSheet(code, purpose, after);
+      },
+    });
+  }
+
+  function actOnScan(item, purpose, after) {
+    if (purpose === 'use') {
+      if (store.isOut(item)) showToast(item.name + ' is out of stock.');
+      else openUseSheet(item);
+    } else if (purpose === 'restock') {
+      openRestockSheet(item);
+    } else {
+      quantitySheet({
+        title: item.name,
+        subtitle: 'How many are on the van?',
+        confirmLabel: 'Save count',
+        start: item.qty || 1,
+        quick: [1, 5, 10, 25],
+        run: (amount) => store.updateItem(item.id, { ...item, qty: amount }),
+        done: () => {
+          after();
+          showToast(fmtQty(item.qty, item.unit) + ' ' + item.name + ' on the van.');
+        },
+      });
+    }
+  }
+
+  // A barcode seen for the first time: link it to a part already in stock, or add a new part with it.
+  function newBarcodeSheet(code, purpose, after) {
+    openDialog((close) => {
+      const list = h('ul', { class: 'rows link-rows' });
+      const fillList = (search) => {
+        const found = sortedItems().filter((item) => matches(item, search)).slice(0, 6);
+        list.replaceChildren(...found.map((item) => h('li', null,
+          h('button', {
+            class: 'row row-plain',
+            type: 'button',
+            onclick: () => {
+              try {
+                store.linkBarcode(item.id, code);
+              } catch (err) {
+                showToast(err.message);
+                return;
+              }
+              close();
+              showToast('Barcode saved for ' + item.name + '.');
+              actOnScan(item, purpose, after);
+            },
+          },
+          h('span', { class: 'row-text' },
+            h('span', { class: 'row-name' }, item.name),
+            h('span', { class: 'row-meta' }, bayTag(item), item.category || null)),
+          h('span', { class: 'row-qty' }, fmtQty(item.qty, item.unit))))));
+      };
+      fillList('');
+
+      const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
+      const line = h('input', {
+        type: 'text',
+        autocomplete: 'off',
+        autocapitalize: 'sentences',
+        'aria-label': 'New part name and how many',
+        placeholder: 'e.g. 15mm elbow 12',
+      });
+      const hasStock = store.state.items.length > 0;
+      return [
+        h('h2', null, 'New barcode'),
+        h('p', { class: 'muted' }, 'Barcode ', h('strong', null, code), '. Tell the app which part this is and it will know it next time.'),
+        hasStock ? h('h3', { class: 'field-label' }, 'One of your parts') : null,
+        hasStock ? searchField('', 'Find the part', fillList) : null,
+        hasStock ? list : null,
+        h('form', {
+          class: 'stack',
+          novalidate: true,
+          onsubmit: (event) => {
+            event.preventDefault();
+            try {
+              const item = store.addFromLine(line.value, { ...quickDefaults(), barcodes: [code] });
+              close();
+              after();
+              showToast('Added ' + fmtQty(item.qty, item.unit) + ' ' + item.name + ' with its barcode.');
+            } catch (err) {
+              error.textContent = err.message;
+              error.hidden = false;
+            }
+          },
+        },
+        h('h3', { class: 'field-label' }, hasStock ? 'Or a new part: name and how many' : 'A new part: name and how many'),
+        h('div', { class: 'quick-line' }, line, h('button', { class: 'btn btn-primary', type: 'submit' }, 'Add')),
+        error),
+        h('button', { class: 'btn btn-wide', type: 'button', autofocus: true, onclick: close }, 'Cancel'),
+      ];
+    });
+  }
+
+  function scanButton(purpose, label, after) {
+    return h('button', {
+      class: 'scan-btn',
+      type: 'button',
+      'aria-label': label,
+      title: label,
+      onclick: () => scanFor(purpose, after || render),
+    }, icon(ICONS.scan));
   }
 
   /* ---------- Quick add ---------- */
@@ -1025,6 +1238,14 @@
       }, lists.length > 0 ? 'Choose different lists' : 'Use a ready-made list instead'),
       bayBar(),
       box,
+      h('button', {
+        class: 'btn btn-wide btn-icon',
+        type: 'button',
+        onclick: () => scanFor('count', () => {
+          fileTypedParts();
+          refreshAll();
+        }),
+      }, icon(ICONS.scan), 'Scan a barcode'),
       ownHeading,
       ownList,
       picker ? picker.el : null,
@@ -1210,10 +1431,12 @@
     if (ui.filter !== 'all' && !options.some(([id]) => id === ui.filter)) ui.filter = 'all';
     return [
       jobBar(),
-      searchField(ui.search, 'Search your parts', (value) => {
-        ui.search = value;
-        fill();
-      }),
+      h('div', { class: 'search-row' },
+        searchField(ui.search, 'Search your parts', (value) => {
+          ui.search = value;
+          fill();
+        }),
+        scanButton('use', 'Scan a barcode to record a use')),
       chipRow(options, ui.filter, (id) => {
         ui.filter = id;
         // Frozen when chosen so rows do not move under a thumb between taps.
@@ -1355,10 +1578,12 @@
           window.scrollTo(0, 0);
         },
       }, 'Add from a trade list'),
-      searchField(ui.stockSearch, 'Search your stock', (value) => {
-        ui.stockSearch = value;
-        fill();
-      }),
+      h('div', { class: 'search-row' },
+        searchField(ui.stockSearch, 'Search your stock', (value) => {
+          ui.stockSearch = value;
+          fill();
+        }),
+        scanButton('restock', 'Scan a barcode to restock')),
       body,
     ];
   }

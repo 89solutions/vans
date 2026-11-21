@@ -114,6 +114,20 @@
     return name;
   }
 
+  // A scanned or typed barcode, kept as plain text. A 12 digit UPC code is the same product as the
+  // 13 digit EAN code with a leading 0, and phones report either, so both are stored as 13 digits.
+  function cleanBarcode(value) {
+    const code = String(value === undefined || value === null ? '' : value).replace(/\s+/g, '');
+    if (!code) throw new Error('Scan or type a barcode.');
+    if (code.length > 64) throw new Error('That barcode is too long.');
+    return /^\d{12}$/.test(code) ? '0' + code : code;
+  }
+
+  function cleanBarcodes(list) {
+    if (!Array.isArray(list)) return [];
+    return [...new Set(list.map(cleanBarcode))];
+  }
+
   function cleanItem(raw) {
     return {
       id: String(raw.id),
@@ -123,6 +137,7 @@
       qty: requireQty(raw.qty, 'Quantity', true),
       low: cleanLow(raw.low),
       bay: cleanBay(raw.bay),
+      barcodes: cleanBarcodes(raw.barcodes),
     };
   }
 
@@ -228,6 +243,14 @@
       }
     }
 
+    // A barcode belongs to one part, so a scan always finds the same thing.
+    function assertBarcodesFree(item) {
+      item.barcodes.forEach((code) => {
+        const owner = state.items.find((i) => i.id !== item.id && i.barcodes.includes(code));
+        if (owner) throw new Error('That barcode is already linked to ' + owner.name + '.');
+      });
+    }
+
     function addLog(item, type, delta) {
       const entry = {
         id: uid(),
@@ -253,6 +276,7 @@
         assertNameFree(name);
         const item = cleanItem({ ...fields, id: uid(), name: name });
         assertBayExists(item);
+        assertBarcodesFree(item);
         state.items.push(item);
         if (state.setupComplete && item.qty > 0) addLog(item, 'added', item.qty);
         save();
@@ -318,15 +342,44 @@
         save();
       },
 
+      // Barcodes are kept unless the fields give a new list.
       updateItem(id, fields) {
         const item = getItem(id);
         const name = cleanName(fields.name);
         assertNameFree(name, id);
-        const next = cleanItem({ ...fields, id: id, name: name });
+        const next = cleanItem({ barcodes: item.barcodes, ...fields, id: id, name: name });
         assertBayExists(next);
+        assertBarcodesFree(next);
         const delta = round(next.qty - item.qty);
         Object.assign(item, next);
         if (delta !== 0 && state.setupComplete) addLog(item, 'correction', delta);
+        save();
+        return item;
+      },
+
+      findByBarcode(code) {
+        let clean;
+        try {
+          clean = cleanBarcode(code);
+        } catch (err) {
+          return undefined;
+        }
+        return state.items.find((i) => i.barcodes.includes(clean));
+      },
+
+      linkBarcode(id, code) {
+        const item = getItem(id);
+        const clean = cleanBarcode(code);
+        if (item.barcodes.includes(clean)) return item;
+        assertBarcodesFree({ id: id, barcodes: [clean] });
+        item.barcodes.push(clean);
+        save();
+        return item;
+      },
+
+      unlinkBarcode(id, code) {
+        const item = getItem(id);
+        item.barcodes = item.barcodes.filter((c) => c !== code);
         save();
         return item;
       },
