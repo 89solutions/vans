@@ -18,6 +18,9 @@
     historyLimit: 100,
     setupFilter: '',
     setupOpen: new Set(),
+    setupPick: new Set(),
+    // The trades shown when adding from a list on the Stock tab, or null when that view is closed.
+    lists: null,
     quick: { more: false, category: '', unit: 'each', low: '', bay: '' },
     editBays: false,
   };
@@ -71,6 +74,19 @@
     electrician: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
     plumber: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
     heating: '<path d="M12 22c4 0 7-2.8 7-7 0-4-3-6.5-4-10-2 2-3 4-3 6-1-1-2-2-2.5-3.5C7 9.5 5 12 5 15c0 4.2 3 7 7 7z"/>',
+    gas: '<circle cx="12" cy="13" r="8"/><path d="m12 13 4-4M9 3h6"/>',
+    carpenter: '<path d="m15 12-8.5 8.5a2.1 2.1 0 0 1-3-3L12 9"/><path d="M17.6 15 22 10.6 13.4 2 9 6.4z"/>',
+    decorator: '<rect x="3" y="3" width="15" height="6" rx="1.5"/><path d="M18 6h3v5h-9v4"/><rect x="10" y="15" width="4" height="6" rx="1"/>',
+    plasterer: '<path d="M3 16h13l5 4H7z"/><path d="M12 16V9a3 3 0 0 1 3-3h3"/>',
+    tiler: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18M12 3v18"/>',
+    roofer: '<path d="M2 12 12 4l10 8"/><path d="M5 10v10h14V10"/>',
+    aircon: '<path d="M12 2v20M3.3 7l17.4 10M3.3 17 20.7 7"/>',
+    security: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
+    data: '<rect x="9" y="2" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/>'
+      + '<rect x="16" y="16" width="6" height="6" rx="1"/><path d="M12 8v4M5 16v-4h14v4"/>',
+    solar: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    handyman: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/>',
+    locksmith: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14 9l2 2"/>',
     blank: '<path d="M12 5v14M5 12h14"/>',
   };
 
@@ -685,30 +701,73 @@
       h('button', { class: 'btn btn-wide', type: 'button', onclick: () => save(0) }, 'Skip: I don’t use bays'));
   }
 
+  // The trade lists for the given ids, in the order they are offered.
+  function tradeLists(ids) {
+    return VanStarters.filter((trade) => ids.includes(trade.id));
+  }
+
+  function partTotal(trade) {
+    return trade.categories.reduce((n, c) => n + c.parts.length, 0);
+  }
+
+  // The bay is chosen once at the top of a trade list, for counting and typing alike.
+  function bayBar() {
+    if (bayCount() === 0) return null;
+    return h('div', { class: 'bay-bar' },
+      h('label', { class: 'field' },
+        h('span', null, 'Putting parts in'),
+        baySelect({
+          onchange: (event) => {
+            ui.quick.bay = event.target.value;
+          },
+        }, ui.quick.bay)),
+      h('p', { class: 'muted small' }, 'Work one bay at a time: choose it here, then count or add what’s in it.'));
+  }
+
   function tradeScreen() {
-    const choose = (trade) => {
-      store.setSetupTrade(trade);
+    const picked = ui.setupPick;
+    const start = (ids) => {
+      store.setSetupTrades(ids);
       ui.setupFilter = '';
       render();
       window.scrollTo(0, 0);
     };
-    const choice = (id, title, meta, iconName, extraClass) => h('button', {
-      class: 'choice' + (extraClass ? ' ' + extraClass : ''),
-      type: 'button',
-      onclick: () => choose(id),
-    },
-    h('span', { class: 'choice-icon' }, icon(ICONS[iconName] || ICONS.blank)),
-    h('span', { class: 'choice-text' },
-      h('span', { class: 'choice-title' }, title),
-      h('span', { class: 'choice-meta' }, meta)),
-    h('span', { class: 'chevron', 'aria-hidden': 'true' }));
+    const go = h('button', { class: 'btn btn-primary btn-wide', type: 'button', onclick: () => start(Array.from(picked)) });
+    const refreshGo = () => {
+      go.disabled = picked.size === 0;
+      go.textContent = picked.size === 0 ? 'Choose one or more trades'
+        : 'Continue with ' + picked.size + (picked.size === 1 ? ' list' : ' lists');
+    };
+    refreshGo();
 
-    return h('div', { class: 'screen' },
+    const card = (trade) => {
+      const button = h('button', {
+        class: 'choice choice-pick',
+        type: 'button',
+        'aria-pressed': String(picked.has(trade.id)),
+        onclick: () => {
+          if (picked.has(trade.id)) picked.delete(trade.id);
+          else picked.add(trade.id);
+          button.setAttribute('aria-pressed', String(picked.has(trade.id)));
+          refreshGo();
+        },
+      },
+      h('span', { class: 'choice-icon' }, icon(ICONS[trade.id] || ICONS.blank)),
+      h('span', { class: 'choice-text' },
+        h('span', { class: 'choice-title' }, trade.label),
+        h('span', { class: 'choice-meta' }, partTotal(trade) + ' common parts')),
+      h('span', { class: 'choice-check', 'aria-hidden': 'true' }));
+      return button;
+    };
+
+    return h('div', { class: 'screen setup' },
       brandMark(),
       h('div', { class: 'hero' },
         vanArt('hero-art', 58),
         h('h1', null, 'What’s on your van?'),
-        h('p', { class: 'muted' }, 'Choose your trade for a ready-made list of parts, then just count what you carry.')),
+        h('p', { class: 'muted' },
+          'Choose your trade for a ready-made list of parts, then just count what you carry. '
+          + 'Work across trades? Choose more than one and they’re joined into one list.')),
       h('div', { class: 'bay-note' },
         h('span', null, bayCount() > 0 ? 'Your van has ' + bayCount() + (bayCount() === 1 ? ' bay.' : ' bays.') : 'No bays set up.'),
         h('button', {
@@ -720,42 +779,27 @@
             window.scrollTo(0, 0);
           },
         }, 'Change')),
-      h('div', { class: 'choices' },
-        VanStarters.map((trade) => {
-          const parts = trade.categories.reduce((n, c) => n + c.parts.length, 0);
-          return choice(trade.id, trade.label, parts + ' common parts', trade.id);
-        }),
-        choice('blank', 'Start with a blank list', 'Type in your own parts', 'blank', 'choice-blank')));
+      h('div', { class: 'choices', role: 'group', 'aria-label': 'Trades' }, VanStarters.map(card)),
+      h('button', { class: 'choice choice-blank', type: 'button', onclick: () => start([]) },
+        h('span', { class: 'choice-icon' }, icon(ICONS.blank)),
+        h('span', { class: 'choice-text' },
+          h('span', { class: 'choice-title' }, 'Start with a blank list'),
+          h('span', { class: 'choice-meta' }, 'Type in your own parts')),
+        h('span', { class: 'chevron', 'aria-hidden': 'true' })),
+      h('div', { class: 'setup-finish' }, go));
   }
 
-  function setupListScreen() {
-    const trade = VanStarters.find((t) => t.id === store.state.setupTrade);
-    const starterNames = new Set();
+  // One or more trade lists to count parts from, by category. Used in setup and from the Stock tab.
+  function starterPicker(lists, onChange, missingText) {
+    const categories = VanStore.combineLists(lists);
+    const names = new Set();
     const counters = [];
     const tallies = [];
-    const ownHeading = h('h2', { class: 'section-title' });
-    const ownList = h('ul', { class: 'rows' });
-    const finish = h('button', { class: 'btn btn-primary btn-wide', type: 'button' });
 
-    function refreshSetup() {
-      const count = store.state.items.length;
-      const own = store.state.items.filter((i) => !starterNames.has(i.name.toLowerCase())).reverse();
-      ownHeading.textContent = trade ? 'Your own parts' : partCount(count) + ' added';
-      ownHeading.hidden = own.length === 0;
-      ownList.replaceChildren(...own.map((item) => h('li', null,
-        h('button', {
-          class: 'row row-plain',
-          type: 'button',
-          onclick: () => itemDialog(item, { after: refreshSetup }),
-        },
-        h('span', { class: 'row-text' },
-          h('span', { class: 'row-name' }, item.name),
-          h('span', { class: 'row-meta' }, bayTag(item), item.category || null)),
-        h('span', { class: 'row-qty' }, fmtQty(item.qty, item.unit))))));
-      counters.forEach((counter) => counter.refresh());
-      tallies.forEach((refreshTally) => refreshTally());
-      finish.textContent = count === 0 ? (trade ? 'Count at least one part' : 'Add your first part above') : 'Finish setup (' + partCount(count) + ')';
-      finish.disabled = count === 0;
+    function refresh() {
+      const byName = new Map(store.state.items.map((item) => [item.name.toLowerCase(), item]));
+      counters.forEach((refreshCounter) => refreshCounter(byName));
+      tallies.forEach((refreshTally) => refreshTally(byName));
     }
 
     function partRow(part) {
@@ -770,7 +814,8 @@
         } catch (err) {
           showToast(err.message);
         }
-        refreshSetup();
+        refresh();
+        if (onChange) onChange();
       };
       const input = h('input', {
         class: 'count-input',
@@ -802,118 +847,142 @@
             'aria-label': 'One more ' + part.name,
             onclick: () => setCount(held() + 1),
           }, '+')));
-      counters.push({
-        part: part,
-        row: row,
-        refresh: () => {
-          const qty = held();
-          const item = store.findItem(part.name);
-          input.value = qty > 0 ? String(qty) : '';
-          minus.disabled = qty <= 0;
-          meta.replaceChildren(...[item ? bayTag(item) : null, part.unit !== 'each' ? part.unit : null].filter(Boolean));
-          row.classList.toggle('counted', qty > 0);
-        },
+      counters.push((byName) => {
+        const item = byName.get(part.name.toLowerCase());
+        const qty = item ? item.qty : 0;
+        input.value = qty > 0 ? String(qty) : '';
+        minus.disabled = qty <= 0;
+        meta.replaceChildren(...[item ? bayTag(item) : null, part.unit !== 'each' ? part.unit : null].filter(Boolean));
+        row.classList.toggle('counted', qty > 0);
       });
       return row;
     }
 
-    let starterList = null;
-    let applyFilter = () => {};
-    if (trade) {
-      trade.categories.forEach((category) => category.parts.forEach((part) => starterNames.add(part.name.toLowerCase())));
-      // Each category opens on a tap, so a long list starts as a short index of categories.
-      const sections = trade.categories.map((category) => {
-        const rows = category.parts.map(partRow);
-        const list = h('ul', { class: 'rows' }, rows);
-        const tally = h('span', { class: 'category-tally' });
-        const toggle = h('button', {
-          class: 'category-toggle',
-          type: 'button',
-          'aria-expanded': 'false',
-          onclick: () => {
-            if (ui.setupOpen.has(category.name)) ui.setupOpen.delete(category.name);
-            else ui.setupOpen.add(category.name);
-            applyFilter();
-          },
+    categories.forEach((category) => category.parts.forEach((part) => names.add(part.name.toLowerCase())));
+    // Each category opens on a tap, so a long list starts as a short index of categories.
+    const sections = categories.map((category) => {
+      const rows = category.parts.map(partRow);
+      const list = h('ul', { class: 'rows' }, rows);
+      const tally = h('span', { class: 'category-tally' });
+      const toggle = h('button', {
+        class: 'category-toggle',
+        type: 'button',
+        'aria-expanded': 'false',
+        onclick: () => {
+          if (ui.setupOpen.has(category.name)) ui.setupOpen.delete(category.name);
+          else ui.setupOpen.add(category.name);
+          applyFilter();
         },
-        h('span', { class: 'category-name' }, category.name),
-        ' ',
-        tally,
-        h('span', { class: 'chevron', 'aria-hidden': 'true' }));
-        tallies.push(() => {
-          const counted = category.parts.filter((part) => {
-            const item = store.findItem(part.name);
-            return item && item.qty > 0;
-          }).length;
-          tally.textContent = counted > 0 ? counted + ' of ' + category.parts.length : category.parts.length + ' parts';
-          tally.classList.toggle('has-count', counted > 0);
-        });
-        return {
-          name: category.name,
-          rows: rows,
-          parts: category.parts,
-          list: list,
-          toggle: toggle,
-          el: h('section', null, h('h2', { class: 'category-heading' }, toggle), list),
-        };
+      },
+      h('span', { class: 'category-name' }, category.name),
+      ' ',
+      tally,
+      h('span', { class: 'chevron', 'aria-hidden': 'true' }));
+      tallies.push((byName) => {
+        const counted = category.parts.filter((part) => {
+          const item = byName.get(part.name.toLowerCase());
+          return item && item.qty > 0;
+        }).length;
+        tally.textContent = counted > 0 ? counted + ' of ' + category.parts.length : category.parts.length + ' parts';
+        tally.classList.toggle('has-count', counted > 0);
       });
-      const noMatch = h('p', { class: 'muted', hidden: true }, 'Not on this list. Add it with the box above.');
-      applyFilter = () => {
-        // While searching, every category with a match is shown open.
-        const searching = ui.setupFilter.trim() !== '';
-        let shown = 0;
-        sections.forEach((section) => {
-          let inSection = 0;
-          section.parts.forEach((part, index) => {
-            const show = matches(part, ui.setupFilter);
-            section.rows[index].hidden = !show;
-            if (show) inSection += 1;
-          });
-          const open = searching || ui.setupOpen.has(section.name);
-          section.list.hidden = !open;
-          section.toggle.setAttribute('aria-expanded', String(open));
-          section.toggle.disabled = searching;
-          section.el.hidden = inSection === 0;
-          shown += inSection;
-        });
-        noMatch.hidden = shown > 0;
+      return {
+        name: category.name,
+        rows: rows,
+        parts: category.parts,
+        list: list,
+        toggle: toggle,
+        el: h('section', null, h('h2', { class: 'category-heading' }, toggle), list),
       };
-      starterList = h('div', { class: 'list' },
-        searchField(ui.setupFilter, 'Find a part on this list', (value) => {
+    });
+    const noMatch = h('p', { class: 'muted', hidden: true }, missingText);
+
+    function applyFilter() {
+      // While searching, every category with a match is shown open.
+      const searching = ui.setupFilter.trim() !== '';
+      let shown = 0;
+      sections.forEach((section) => {
+        let inSection = 0;
+        section.parts.forEach((part, index) => {
+          const show = matches(part, ui.setupFilter);
+          section.rows[index].hidden = !show;
+          if (show) inSection += 1;
+        });
+        const open = searching || ui.setupOpen.has(section.name);
+        section.list.hidden = !open;
+        section.toggle.setAttribute('aria-expanded', String(open));
+        section.toggle.disabled = searching;
+        section.el.hidden = inSection === 0;
+        shown += inSection;
+      });
+      noMatch.hidden = shown > 0;
+    }
+
+    applyFilter();
+    refresh();
+    return {
+      names: names,
+      refresh: refresh,
+      el: h('div', { class: 'list' },
+        searchField(ui.setupFilter, lists.length === 1 ? 'Find a part on this list' : 'Find a part on these lists', (value) => {
           ui.setupFilter = value;
           applyFilter();
         }),
         sections.map((section) => section.el),
-        noMatch);
+        noMatch),
+    };
+  }
+
+  function setupListScreen() {
+    const lists = tradeLists(store.state.setupTrades);
+    const ownHeading = h('h2', { class: 'section-title' });
+    const ownList = h('ul', { class: 'rows' });
+    const finish = h('button', { class: 'btn btn-primary btn-wide', type: 'button' });
+    const picker = lists.length > 0
+      ? starterPicker(lists, () => refreshSetup(),
+        (lists.length === 1 ? 'Not on this list.' : 'Not on these lists.') + ' Add it with the box above.')
+      : null;
+
+    function refreshSetup() {
+      const count = store.state.items.length;
+      const own = store.state.items.filter((i) => !(picker && picker.names.has(i.name.toLowerCase()))).reverse();
+      ownHeading.textContent = picker ? 'Your own parts' : partCount(count) + ' added';
+      ownHeading.hidden = own.length === 0;
+      ownList.replaceChildren(...own.map((item) => h('li', null,
+        h('button', {
+          class: 'row row-plain',
+          type: 'button',
+          onclick: () => itemDialog(item, { after: refreshAll }),
+        },
+        h('span', { class: 'row-text' },
+          h('span', { class: 'row-name' }, item.name),
+          h('span', { class: 'row-meta' }, bayTag(item), item.category || null)),
+        h('span', { class: 'row-qty' }, fmtQty(item.qty, item.unit))))));
+      finish.textContent = count === 0 ? (picker ? 'Count at least one part' : 'Add your first part above') : 'Finish setup (' + partCount(count) + ')';
+      finish.disabled = count === 0;
     }
 
-    // A part typed by hand that is also on the list goes under the list's category.
+    // Typing or editing a part can change a count on the list too.
+    function refreshAll() {
+      if (picker) picker.refresh();
+      refreshSetup();
+    }
+
+    // A part typed by hand that is also on a list goes under the list's category.
     function fileTypedParts() {
-      if (!trade) return;
-      trade.categories.forEach((category) => category.parts.forEach((part) => {
+      lists.forEach((trade) => trade.categories.forEach((category) => category.parts.forEach((part) => {
         const item = store.findItem(part.name);
         if (item && !item.category) store.updateItem(item.id, { ...item, category: part.category });
-      }));
+      })));
     }
 
     const box = quickAddBox({
       showBay: false,
       onAdded: () => {
         fileTypedParts();
-        refreshSetup();
+        refreshAll();
       },
     });
-
-    // During setup the bay is chosen once at the top, for counting and typing alike.
-    const bayBar = bayCount() > 0 ? h('div', { class: 'bay-bar' },
-      h('label', { class: 'field' },
-        h('span', null, 'Putting parts in'),
-        baySelect({
-          onchange: (event) => {
-            ui.quick.bay = event.target.value;
-          },
-        }, ui.quick.bay)),
-      h('p', { class: 'muted small' }, 'Work one bay at a time: choose it here, then count or add what’s in it.')) : null;
 
     finish.addEventListener('click', () => {
       try {
@@ -935,29 +1004,30 @@
       }
     });
 
-    applyFilter();
     refreshSetup();
 
+    const howTo = 'Open a category, then tap + or type how many you carry. Skip anything you don’t carry. Your progress saves as you go.';
     return h('div', { class: 'screen setup' },
       brandMark(),
-      h('h1', null, trade ? trade.label + ' parts' : 'What’s on your van?'),
-      h('p', { class: 'muted' }, trade
-        ? 'Open a category, then tap + or type how many you carry. Skip anything you don’t carry. Your progress saves as you go.'
-        : 'Type each part and how many, then press Add. Your progress saves as you go.'),
+      h('h1', null, lists.length === 1 ? lists[0].label + ' parts' : lists.length > 1 ? 'Your parts lists' : 'What’s on your van?'),
+      h('p', { class: 'muted' }, lists.length > 1
+        ? 'One list for ' + lists.map((trade) => trade.label).join(', ') + '. ' + howTo
+        : lists.length === 1 ? howTo : 'Type each part and how many, then press Add. Your progress saves as you go.'),
       h('button', {
         class: 'link-btn',
         type: 'button',
         onclick: () => {
-          store.setSetupTrade(null);
+          ui.setupPick = new Set(store.state.setupTrades);
+          store.setSetupTrades(null);
           render();
           window.scrollTo(0, 0);
         },
-      }, trade ? 'Choose a different list' : 'Use a ready-made list instead'),
-      bayBar,
+      }, lists.length > 0 ? 'Choose different lists' : 'Use a ready-made list instead'),
+      bayBar(),
       box,
       ownHeading,
       ownList,
-      starterList,
+      picker ? picker.el : null,
       h('div', { class: 'setup-finish' }, finish));
   }
 
@@ -1213,7 +1283,48 @@
     return [h('ul', { class: 'rows' }, items.map(stockRow))];
   }
 
+  // Counting from trade lists after setup, for new work or a trade not chosen at the start.
+  function listsView() {
+    const picked = ui.lists;
+    const close = () => {
+      ui.lists = null;
+      ui.setupFilter = '';
+      render();
+      window.scrollTo(0, 0);
+    };
+    const done = h('button', { class: 'btn btn-primary btn-wide', type: 'button', onclick: close }, 'Done');
+    const lists = tradeLists(Array.from(picked));
+    const picker = lists.length > 0
+      ? starterPicker(lists, () => {
+        root.querySelector('.summary').replaceWith(stockSummary());
+        root.querySelector('.tabs').replaceWith(navBar());
+      }, (lists.length === 1 ? 'Not on this list.' : 'Not on these lists.') + ' Tap Done and type it in on the Stock tab.')
+      : null;
+    return [
+      h('p', { class: 'muted' },
+        'Choose one or more trades, then count what you carry. Parts already on your van show their count, and changes save as you go.'),
+      // Wrapped rather than scrolled, so every chosen trade stays in view.
+      h('div', { class: 'chips chips-wrap', role: 'group', 'aria-label': 'Trades' },
+        VanStarters.map((trade) => h('button', {
+          class: 'chip',
+          type: 'button',
+          'aria-pressed': String(picked.has(trade.id)),
+          'data-key': 'trade:' + trade.id,
+          onclick: () => {
+            if (picked.has(trade.id)) picked.delete(trade.id);
+            else picked.add(trade.id);
+            render();
+          },
+        }, trade.label))),
+      picker ? bayBar() : null,
+      picker ? picker.el : emptyMessage('Choose a trade above to see its parts.'),
+      picker ? h('p', { class: 'muted small' }, 'A part counted down to 0 stays on your stock as out. Delete parts on the Stock tab.') : null,
+      done,
+    ];
+  }
+
   function stockView() {
+    if (ui.lists) return listsView();
     const body = h('div', { class: 'stack-wide' });
     const fill = () => {
       const lowCount = store.state.items.filter((i) => store.isLow(i)).length;
@@ -1234,6 +1345,16 @@
           root.querySelector('.tabs').replaceWith(navBar());
         },
       }),
+      h('button', {
+        class: 'btn btn-wide',
+        type: 'button',
+        onclick: () => {
+          ui.lists = new Set(store.state.setupTrades || []);
+          ui.setupFilter = '';
+          render();
+          window.scrollTo(0, 0);
+        },
+      }, 'Add from a trade list'),
       searchField(ui.stockSearch, 'Search your stock', (value) => {
         ui.stockSearch = value;
         fill();
@@ -1390,6 +1511,8 @@
               ui.stockSearch = '';
               ui.stockFilter = 'all';
               ui.quick = { more: false, category: '', unit: 'each', low: '', bay: '' };
+              ui.setupPick = new Set();
+              ui.lists = null;
               render();
               window.scrollTo(0, 0);
             }
@@ -1417,6 +1540,7 @@
         'data-key': 'tab:' + id,
         onclick: () => {
           ui.tab = id;
+          ui.lists = null;
           render();
           window.scrollTo(0, 0);
         },
@@ -1441,7 +1565,7 @@
     return h('div', { class: 'screen with-tabs' },
       h('header', { class: 'top' },
         brandMark(),
-        h('h1', null, tab[1] === 'Use' ? 'Record parts used' : tab[1]),
+        h('h1', null, tab[1] === 'Use' ? 'Record parts used' : ui.tab === 'stock' && ui.lists ? 'Add from trade lists' : tab[1]),
         ui.tab === 'use' || ui.tab === 'stock' ? stockSummary() : null),
       tab[2](),
       navBar());
@@ -1454,8 +1578,8 @@
     const chipScroll = chips ? chips.scrollLeft : 0;
 
     if (store.state.setupComplete) root.replaceChildren(mainScreen());
-    else if (ui.editBays || (store.state.bays === null && !store.state.setupTrade)) root.replaceChildren(baysScreen());
-    else root.replaceChildren(store.state.setupTrade ? setupListScreen() : tradeScreen());
+    else if (ui.editBays || (store.state.bays === null && store.state.setupTrades === null)) root.replaceChildren(baysScreen());
+    else root.replaceChildren(store.state.setupTrades ? setupListScreen() : tradeScreen());
 
     const newChips = root.querySelector('.chips');
     if (newChips) newChips.scrollLeft = chipScroll;

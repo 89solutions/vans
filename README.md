@@ -2,7 +2,8 @@
 
 A phone-first web app for tradespeople to track the parts they carry on their van.
 
-- **First use:** say how many bays the van has, then choose a trade and count parts on a ready-made list, or start from a blank list.
+- **First use:** say how many bays the van has, then choose one or more trades and count parts on a ready-made list, or start from a blank list. Several trades are joined into one list, with shared parts shown once.
+- **Trade lists:** electrician, plumber, heating engineer, gas engineer, carpenter / joiner, painter / decorator, plasterer / dryliner, tiler, roofer, air con / refrigeration, fire and security, data and network, solar PV and EV chargers, handyman / maintenance and locksmith. After setup, **Add from a trade list** on the Stock tab counts more parts from any of them.
 - **Bays:** each part can be given a bay, shown on its row. Filter the Use tab by bay, or search for `bay 2`. Change the number of bays on the More tab.
 - **Quick add:** type `15mm elbow 12` or `twin and earth 50m` in one box, or paste a whole list. Works in setup and on the Stock tab.
 - **On the job:** tap **Use 1** beside a part, or tap the part to enter a larger amount. Stock is deducted straight away, with an Undo.

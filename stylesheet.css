@@ -255,6 +255,9 @@ button:disabled { cursor: default; }
 
 .chips::-webkit-scrollbar { display: none; }
 
+.chips-wrap { flex-wrap: wrap; margin: 0; padding: 0; overflow: visible; }
+.chips-wrap .chip { min-height: 40px; padding: 6px 14px; }
+
 .chip {
   flex: none;
   min-width: 48px;
@@ -453,6 +456,34 @@ button:disabled { cursor: default; }
 .choice-blank { background: transparent; border-style: dashed; border-color: var(--line-strong); box-shadow: none; }
 .choice-blank .choice-icon { background: var(--surface-2); }
 .choice .chevron { transform: rotate(-45deg); margin: 0 4px 0 0; color: var(--muted); }
+
+/* Trade cards can be picked several at a time, shown with a tick box. */
+.choice-pick[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-1); }
+.choice-pick[aria-pressed="true"] .choice-icon { background: var(--accent); color: var(--accent-ink); }
+
+.choice-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.choice-pick[aria-pressed="true"] .choice-check { background: var(--accent); border-color: var(--accent); }
+
+.choice-pick[aria-pressed="true"] .choice-check::after {
+  content: '';
+  width: 6px;
+  height: 11px;
+  margin-top: -2px;
+  border: solid var(--accent-ink);
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+}
+
+.choices + .choice-blank { margin-top: 4px; }
 
 /* Bays */
 .field-label { font-size: 0.88rem; font-weight: 700; }

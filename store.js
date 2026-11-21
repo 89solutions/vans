@@ -18,7 +18,7 @@
 
   function emptyState() {
     // bays is null until asked during setup, and 0 for a van without numbered bays.
-    return { version: 1, setupComplete: false, setupTrade: null, bays: null, items: [], log: [], currentJob: '' };
+    return { version: 1, setupComplete: false, setupTrades: null, bays: null, items: [], log: [], currentJob: '' };
   }
 
   const MAX_BAYS = 100;
@@ -143,6 +143,31 @@
     };
   }
 
+  // The trade lists chosen in setup: null until chosen, empty for a blank list.
+  // Older data saved one trade, or "blank", as setupTrade.
+  function cleanTrades(raw) {
+    if (Array.isArray(raw.setupTrades)) return raw.setupTrades.map(String);
+    if (!raw.setupTrade) return null;
+    return raw.setupTrade === 'blank' ? [] : [String(raw.setupTrade)];
+  }
+
+  // Joins several trade lists into one. Categories with the same name are merged,
+  // and a part on more than one list is kept once, where it first appears.
+  function combineLists(lists) {
+    const categories = new Map();
+    const seen = new Set();
+    lists.forEach((list) => list.categories.forEach((category) => {
+      if (!categories.has(category.name)) categories.set(category.name, []);
+      category.parts.forEach((part) => {
+        const lower = part.name.toLowerCase();
+        if (seen.has(lower)) return;
+        seen.add(lower);
+        categories.get(category.name).push({ ...part, category: category.name });
+      });
+    }));
+    return Array.from(categories, ([name, parts]) => ({ name: name, parts: parts })).filter((c) => c.parts.length > 0);
+  }
+
   // Checks saved or imported data, so a bad backup file cannot break the app.
   function cleanState(raw) {
     if (!raw || !Array.isArray(raw.items) || !Array.isArray(raw.log)) {
@@ -151,7 +176,7 @@
     return {
       version: 1,
       setupComplete: Boolean(raw.setupComplete),
-      setupTrade: raw.setupTrade ? String(raw.setupTrade) : null,
+      setupTrades: cleanTrades(raw),
       bays: cleanBayCount(raw.bays),
       items: raw.items.map(cleanItem),
       log: raw.log.map(cleanEntry),
@@ -258,12 +283,13 @@
         return result;
       },
 
-      // Sets the count for a starter list part. At 0 the part is not kept on the van's list.
+      // Sets the count for a starter list part. At 0 during setup the part is not kept on the van's list;
+      // after setup it stays on as out of stock, so its history and settings are kept.
       setStarterCount(part, value) {
         const qty = requireQty(value, 'Quantity', true);
         const existing = this.findItem(part.name);
         if (existing) {
-          if (qty === 0) this.deleteItem(existing.id);
+          if (qty === 0 && !state.setupComplete) this.deleteItem(existing.id);
           else this.updateItem(existing.id, { ...existing, qty: qty });
         } else if (qty > 0) {
           this.addItem({ ...part, qty: qty });
@@ -286,8 +312,9 @@
         return cleared;
       },
 
-      setSetupTrade(trade) {
-        state.setupTrade = trade;
+      // Takes the chosen trade ids, an empty list for a blank list, or null to choose again.
+      setSetupTrades(trades) {
+        state.setupTrades = trades === null ? null : trades.map(String);
         save();
       },
 
@@ -424,5 +451,5 @@
     };
   }
 
-  global.VanStore = { createStore: createStore, parseItemLine: parseItemLine, UNITS: UNITS, MAX_BAYS: MAX_BAYS };
+  global.VanStore = { createStore: createStore, parseItemLine: parseItemLine, combineLists: combineLists, UNITS: UNITS, MAX_BAYS: MAX_BAYS };
 })(window);
